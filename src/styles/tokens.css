@@ -1,0 +1,53 @@
+:root {
+  /* Brand palette (only colors from spec) */
+  --bg: #DCEDFF;
+  --accent: #94B0DA;
+  --secondary: #8F91A2;
+  --text-soft: #505A5B;
+  --text: #343F3E;
+
+  /* Derived alpha tints of brand colors */
+  --accent-08: rgba(148, 176, 218, 0.08);
+  --accent-12: rgba(148, 176, 218, 0.12);
+  --accent-20: rgba(148, 176, 218, 0.20);
+  --accent-35: rgba(148, 176, 218, 0.35);
+  --accent-60: rgba(148, 176, 218, 0.60);
+
+  --secondary-12: rgba(143, 145, 162, 0.12);
+  --secondary-20: rgba(143, 145, 162, 0.20);
+  --hairline: rgba(143, 145, 162, 0.18);
+
+  --text-08: rgba(52, 63, 62, 0.08);
+  --text-soft-12: rgba(80, 90, 91, 0.12);
+
+  /* Neutral surface (required for shadow lift over tinted bg) */
+  --surface: #FFFFFF;
+  --surface-2: #F4F8FE;
+
+  /* Radii */
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --r-xl: 24px;
+  --r-pill: 999px;
+
+  /* Soft shadows (no hard borders) */
+  --shadow-sm: 0 1px 2px rgba(52, 63, 62, 0.04), 0 1px 3px rgba(52, 63, 62, 0.04);
+  --shadow-md: 0 6px 16px rgba(52, 63, 62, 0.06), 0 2px 4px rgba(52, 63, 62, 0.04);
+  --shadow-lg: 0 16px 40px rgba(52, 63, 62, 0.08);
+
+  /* Spacing */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+  --s-7: 48px;
+  --s-8: 64px;
+
+  --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+
+  --sidebar-w: 248px;
+  --topbar-h: 72px;
+}
