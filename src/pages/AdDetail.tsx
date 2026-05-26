@@ -1,7 +1,7 @@
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Check, Copy, ExternalLink, Pencil, Trash2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import type { Targeting } from '../types';
+import type { AdLocation, Targeting } from '../types';
 import { PageHeader } from '../components/layout/PageHeader';
 import { Card } from '../components/ui/Card';
 import { Toggle } from '../components/ui/Toggle';
@@ -12,13 +12,14 @@ import { DuplicateAdDialog } from '../components/ad/DuplicateAdDialog';
 import { AdForm } from '../components/ad/AdForm';
 import { AdPreview } from '../components/ad/AdPreview';
 import { TargetSummaryCard } from '../components/ad/TargetSummaryCard';
+import { ClickAudienceSignals } from '../components/ad/ClickAudienceSignals';
 import { TargetingBuilder } from '../components/targeting/TargetingBuilder';
 import { TrendChart } from '../components/charts/TrendChart';
 import { BarComparison } from '../components/charts/BarComparison';
 import { useApp } from '../store/AppContext';
 import { adCtr } from '../store/selectors';
 import { formatNumber, formatPercent } from '../lib/format';
-import { AUDIENCE_LABEL } from '../data/constants';
+import { AUDIENCE_LABEL, AD_LOCATION_LABEL } from '../data/constants';
 import { Badge } from '../components/ui/Badge';
 
 export default function AdDetail() {
@@ -43,6 +44,7 @@ export default function AdDetail() {
     redirectUrl: string;
     creativeUrl?: string;
     iconUrl?: string;
+    location: AdLocation;
     targeting: Targeting;
   };
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -58,6 +60,7 @@ export default function AdDetail() {
             redirectUrl: ad.redirectUrl,
             creativeUrl: ad.creativeUrl,
             iconUrl: ad.iconUrl,
+            location: ad.location,
             targeting: ad.targeting,
           }
         : null,
@@ -73,6 +76,7 @@ export default function AdDetail() {
       draft.redirectUrl !== ad.redirectUrl ||
       (draft.creativeUrl ?? '') !== (ad.creativeUrl ?? '') ||
       (draft.iconUrl ?? '') !== (ad.iconUrl ?? '') ||
+      draft.location !== ad.location ||
       JSON.stringify(draft.targeting) !== JSON.stringify(ad.targeting))
   );
 
@@ -91,6 +95,7 @@ export default function AdDetail() {
           redirectUrl: draft.redirectUrl,
           creativeUrl: draft.creativeUrl,
           iconUrl: draft.iconUrl,
+          location: draft.location,
         },
       },
     });
@@ -133,9 +138,12 @@ export default function AdDetail() {
       <PageHeader
         title=""
         meta={
-           <Badge tone={isActive ? 'active' : 'paused'} withDot>
-                        {isActive ? 'Active' : 'Paused'}
-                      </Badge>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+            <Badge tone={isActive ? 'active' : 'paused'} withDot>
+              {isActive ? 'Active' : 'Paused'}
+            </Badge>
+            <Badge tone="neutral">{AD_LOCATION_LABEL[ad.location]}</Badge>
+          </div>
         }
         back={backTo}
         onBack={editing ? requestBack : undefined}
@@ -208,6 +216,7 @@ export default function AdDetail() {
                 redirectUrl: draft?.redirectUrl ?? ad.redirectUrl,
                 creativeUrl: draft?.creativeUrl ?? ad.creativeUrl,
                 iconUrl: draft?.iconUrl ?? ad.iconUrl,
+                location: draft?.location ?? ad.location,
               }}
               onChange={(patch) =>
                 setDraft((d) => (d ? { ...d, ...patch } : d))
@@ -323,6 +332,12 @@ export default function AdDetail() {
                   )}
                 </DataRow> */}
 
+                <DataRow label="Location">
+                  <span style={{ fontSize: 14, color: 'var(--text)', fontWeight: 600 }}>
+                    {AD_LOCATION_LABEL[ad.location]}
+                  </span>
+                </DataRow>
+
                 <DataRow label="Campaign">
                   <span style={{ fontSize: 14, color: 'var(--text)', fontWeight: 600 }}>
                     {campaign.name}
@@ -402,6 +417,10 @@ export default function AdDetail() {
                 />
               )}
             </Card>
+          </div>
+
+          <div style={{ marginTop: 'var(--s-4)' }}>
+            <ClickAudienceSignals ad={ad} />
           </div>
         </>
       )}

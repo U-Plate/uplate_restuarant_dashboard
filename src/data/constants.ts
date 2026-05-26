@@ -1,4 +1,5 @@
 import type {
+  AdLocation,
   AudienceTag,
   DietaryPreference,
   Allergy,
@@ -107,6 +108,24 @@ export const DIETARY_LABEL: Record<DietaryPreference, string> = {
   pescatarian: 'Pescatarian',
   kosher: 'Kosher',
   halal: 'Halal',
+};
+
+export const AD_LOCATIONS: { value: AdLocation; label: string; hint: string }[] = [
+  {
+    value: 'homeScreen',
+    label: 'Home Screen',
+    hint: 'Full-card ad shown on the app home feed.',
+  },
+  {
+    value: 'diningHallMenu',
+    label: 'Dining Hall Menu',
+    hint: 'Compact banner shown inside dining hall menus.',
+  },
+];
+
+export const AD_LOCATION_LABEL: Record<AdLocation, string> = {
+  homeScreen: 'Home Screen',
+  diningHallMenu: 'Dining Hall Menu',
 };
 
 export const ALLERGY_LABEL: Record<Allergy, string> = {

@@ -1,8 +1,13 @@
 import type {
   Ad,
+  AdEvent,
+  AdLocation,
   AnalyticsPoint,
   AppState,
+  AudienceTag,
   Campaign,
+  DayOfWeek,
+  DietaryPreference,
   Targeting,
 } from '../types';
 
@@ -22,27 +27,186 @@ function daysAgo(n: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-function generateSeries(seed: number, days = 30, baseImpressions = 1200): AnalyticsPoint[] {
-  const rand = seeded(seed);
-  const out: AnalyticsPoint[] = [];
-  for (let i = days - 1; i >= 0; i--) {
-    const wave = Math.sin((days - i) / 3) * 0.18 + 0.9;
-    const impressions = Math.round(baseImpressions * wave * (0.8 + rand() * 0.5));
-    const ctr = 0.025 + rand() * 0.04;
-    const clicks = Math.max(1, Math.round(impressions * ctr));
-    out.push({ date: daysAgo(i), impressions, clicks });
+const ALL_AUDIENCE_TAGS: AudienceTag[] = [
+  'highProtein',
+  'highCarb',
+  'postWorkout',
+  'lowCalorie',
+  'macroFriendly',
+];
+
+const ALL_DIETARY: DietaryPreference[] = [
+  'vegetarian',
+  'vegan',
+  'glutenFree',
+  'dairyFree',
+  'kosher',
+  'halal',
+  'pescatarian',
+];
+
+const OFF_TARGET_FOODS: string[] = [
+  'Power Smoothie',
+  'Salad Bowl',
+  'Cold Brew',
+  'Burrito Bowl',
+  'Energy Bar',
+  'Açaí Bowl',
+];
+
+const ALL_DAYS: DayOfWeek[] = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+
+function pickWeighted<T>(items: readonly T[], probability: number, rand: () => number): T[] {
+  const out: T[] = [];
+  for (const item of items) {
+    if (rand() < probability) out.push(item);
   }
   return out;
 }
 
-function totals(series: AnalyticsPoint[]) {
-  return series.reduce(
-    (acc, p) => ({
-      impressions: acc.impressions + p.impressions,
-      clicks: acc.clicks + p.clicks,
-    }),
-    { impressions: 0, clicks: 0 }
+// Bucket an offset-from-today (0..29) into a real timestamp, snapped to a
+// random hour/minute that respects the ad's time targeting window when one
+// exists. Most signal endpoints care about hour-of-day, so the bias has to
+// be in the timestamp itself.
+function pickOccurredAt(
+  dayOffset: number,
+  targeting: Targeting,
+  rand: () => number,
+): Date {
+  const d = new Date();
+  d.setDate(d.getDate() - dayOffset);
+  const range = targeting.time.range;
+  let hour: number;
+  if (range && rand() < 0.78) {
+    const { startHour, endHour } = range;
+    if (endHour > startHour) {
+      hour = startHour + Math.floor(rand() * Math.max(1, endHour - startHour));
+    } else {
+      // Wrap-around window (e.g. 21..2 → 21,22,23,0,1).
+      const span = 24 - startHour + endHour;
+      const offset = Math.floor(rand() * Math.max(1, span));
+      hour = (startHour + offset) % 24;
+    }
+  } else {
+    // Lunch + dinner double peak shows up by default even without targeting.
+    hour = rand() < 0.55 ? 11 + Math.floor(rand() * 4) : 17 + Math.floor(rand() * 5);
+  }
+  d.setHours(hour, Math.floor(rand() * 60), Math.floor(rand() * 60), 0);
+  return d;
+}
+
+function generateEventsForAd(
+  ad: Ad,
+  seed: number,
+  totalEvents = 50,
+  clickShare = 0.3,
+): AdEvent[] {
+  const rand = seeded(seed);
+  const targeting = ad.targeting;
+
+  const targetedTagSet = new Set(targeting.audienceTags.map((r) => r.tag));
+  const targetedDietSet = new Set(targeting.dietary.map((r) => r.pref));
+  const targetedFoods = targeting.foodInterests.map((r) => r.name);
+  const targetedDays = new Set<DayOfWeek>(
+    targeting.time.days.length > 0 ? targeting.time.days : ALL_DAYS,
   );
+  const wantsRecurring = targeting.behavioral.recurringCustomer;
+
+  const events: AdEvent[] = [];
+  const numClicks = Math.round(totalEvents * clickShare);
+  const numImpressions = totalEvents - numClicks;
+
+  for (let i = 0; i < totalEvents; i++) {
+    const isClick = i < numClicks;
+
+    // Spread events over the last 30 days, with a tiny bias toward more
+    // recent dates so the daily series feels "fresh".
+    const dayOffset = Math.floor(Math.pow(rand(), 1.4) * 30);
+    let occurredAt = pickOccurredAt(dayOffset, targeting, rand);
+
+    // If the ad targets specific days, retry up to 3x to land on one of them.
+    const jsToMon = (jsDay: number) => ALL_DAYS[(jsDay + 6) % 7];
+    if (targeting.time.days.length > 0) {
+      for (let tries = 0; tries < 3; tries++) {
+        if (targetedDays.has(jsToMon(occurredAt.getDay()))) break;
+        occurredAt = pickOccurredAt(dayOffset, targeting, rand);
+      }
+    }
+
+    // Audience tags: clickers match the ad's tags far more often than they
+    // match unrelated tags. Impressions also lean targeted (the ad served
+    // because something matched) but with more noise so the comparison
+    // shows up nicely on the dashboard.
+    const targetHit = isClick ? 0.72 : 0.55;
+    const offTarget = isClick ? 0.1 : 0.18;
+    const tags: AudienceTag[] = [];
+    for (const t of ALL_AUDIENCE_TAGS) {
+      const targeted = targetedTagSet.has(t);
+      if (rand() < (targeted ? targetHit : offTarget)) tags.push(t);
+    }
+
+    const dietary: DietaryPreference[] = [];
+    for (const p of ALL_DIETARY) {
+      const targeted = targetedDietSet.has(p);
+      if (rand() < (targeted ? (isClick ? 0.7 : 0.5) : isClick ? 0.06 : 0.1)) {
+        dietary.push(p);
+      }
+    }
+
+    const foodInterests: string[] = [];
+    for (const name of targetedFoods) {
+      if (rand() < (isClick ? 0.66 : 0.48)) foodInterests.push(name);
+    }
+    for (const name of pickWeighted(OFF_TARGET_FOODS, isClick ? 0.08 : 0.14, rand)) {
+      if (!foodInterests.includes(name)) foodInterests.push(name);
+    }
+
+    const recurringProb = wantsRecurring
+      ? isClick
+        ? 0.72
+        : 0.55
+      : isClick
+        ? 0.36
+        : 0.3;
+
+    events.push({
+      id: `ev-${ad.id}-${i}`,
+      adId: ad.id,
+      type: isClick ? 'click' : 'impression',
+      occurredAt: occurredAt.toISOString(),
+      recurringCustomer: rand() < recurringProb,
+      tags,
+      dietary,
+      foodInterests,
+    });
+  }
+
+  void numImpressions;
+  return events;
+}
+
+function metricsFromEvents(events: AdEvent[]): {
+  impressions: number;
+  clicks: number;
+  series: AnalyticsPoint[];
+} {
+  const byDate = new Map<string, AnalyticsPoint>();
+  let impressions = 0;
+  let clicks = 0;
+  for (const ev of events) {
+    const date = ev.occurredAt.slice(0, 10);
+    const point = byDate.get(date) ?? { date, impressions: 0, clicks: 0 };
+    if (ev.type === 'impression') {
+      point.impressions += 1;
+      impressions += 1;
+    } else {
+      point.clicks += 1;
+      clicks += 1;
+    }
+    byDate.set(date, point);
+  }
+  const series = [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
+  return { impressions, clicks, series };
 }
 
 function emptyTargeting(): Targeting {
@@ -65,31 +229,40 @@ function makeAd(
   targeting: Targeting,
   seed: number,
   status: 'active' | 'paused' = 'active',
-  base = 1200
-): Ad {
-  const series = generateSeries(seed, 30, base);
-  const t = totals(series);
+  totalEvents = 50,
+  location: AdLocation = 'homeScreen',
+): { ad: Ad; events: AdEvent[] } {
   const now = new Date().toISOString();
-  return {
+  const skeleton: Ad = {
     id,
     campaignId,
     title,
     description,
     redirectUrl,
     status,
+    location,
     targeting,
-    metrics: { impressions: t.impressions, clicks: t.clicks, series },
+    metrics: { impressions: 0, clicks: 0, series: [] },
     createdAt: now,
     updatedAt: now,
   };
+  const events = generateEventsForAd(skeleton, seed, totalEvents);
+  const ad: Ad = { ...skeleton, metrics: metricsFromEvents(events) };
+  return { ad, events };
 }
 
 export function buildSeedState(): AppState {
   const ads: Record<string, Ad> = {};
   const campaigns: Record<string, Campaign> = {};
   const campaignOrder: string[] = [];
+  const events: AdEvent[] = [];
 
   const now = new Date().toISOString();
+
+  function add(result: { ad: Ad; events: AdEvent[] }) {
+    ads[result.ad.id] = result.ad;
+    events.push(...result.events);
+  }
 
   // Campaign 1: Post-Workout Protein Bowls
   const c1: Campaign = {
@@ -105,62 +278,69 @@ export function buildSeedState(): AppState {
   campaigns[c1.id] = c1;
   campaignOrder.push(c1.id);
 
-  ads['a1'] = makeAd(
-    'a1',
-    'c1',
-    'Chicken Quinoa Power Bowl',
-    'Hit your macros with 42g of grilled chicken protein over warm quinoa.',
-    'https://uplate.app/order/chicken-quinoa-bowl',
-    {
-      ...emptyTargeting(),
-      audienceTags: [
-        { tag: 'highProtein', priority: 'required' },
-        { tag: 'postWorkout', priority: 'high' },
-      ],
-      foodInterests: [
-        { name: 'Quinoa Bowl', priority: 'high' },
-        { name: 'Protein Shake', priority: 'medium' },
-      ],
-      time: { range: { startHour: 11, endHour: 21 }, days: ['mon', 'tue', 'wed', 'thu', 'fri'] },
-    },
-    101,
-    'active',
-    1800
+  add(
+    makeAd(
+      'a1',
+      'c1',
+      'Chicken Quinoa Power Bowl',
+      'Hit your macros with 42g of grilled chicken protein over warm quinoa.',
+      'https://uplate.app/order/chicken-quinoa-bowl',
+      {
+        ...emptyTargeting(),
+        audienceTags: [
+          { tag: 'highProtein', priority: 'required' },
+          { tag: 'postWorkout', priority: 'high' },
+        ],
+        foodInterests: [
+          { name: 'Quinoa Bowl', priority: 'high' },
+          { name: 'Protein Shake', priority: 'medium' },
+        ],
+        time: { range: { startHour: 11, endHour: 21 }, days: ['mon', 'tue', 'wed', 'thu', 'fri'] },
+      },
+      101,
+      'active',
+      60,
+    ),
   );
-  ads['a2'] = makeAd(
-    'a2',
-    'c1',
-    'Salmon Macro Plate',
-    'Wild-caught salmon, sweet potato, kale. Balanced 40/30/30 split.',
-    'https://uplate.app/order/salmon-macro-plate',
-    {
-      ...emptyTargeting(),
-      audienceTags: [
-        { tag: 'highProtein', priority: 'high' },
-        { tag: 'macroFriendly', priority: 'required' },
-      ],
-      dietary: [{ pref: 'pescatarian', priority: 'medium' }],
-      foodInterests: [{ name: 'Grilled Salmon', priority: 'high' }],
-    },
-    102,
-    'active',
-    1400
+  add(
+    makeAd(
+      'a2',
+      'c1',
+      'Salmon Macro Plate',
+      'Wild-caught salmon, sweet potato, kale. Balanced 40/30/30 split.',
+      'https://uplate.app/order/salmon-macro-plate',
+      {
+        ...emptyTargeting(),
+        audienceTags: [
+          { tag: 'highProtein', priority: 'high' },
+          { tag: 'macroFriendly', priority: 'required' },
+        ],
+        dietary: [{ pref: 'pescatarian', priority: 'medium' }],
+        foodInterests: [{ name: 'Grilled Salmon', priority: 'high' }],
+      },
+      102,
+      'active',
+      55,
+    ),
   );
-  ads['a3'] = makeAd(
-    'a3',
-    'c1',
-    'Greek Yogurt Recovery Cup',
-    'Quick post-lift refuel. 22g protein, honey, and granola crunch.',
-    'https://uplate.app/order/greek-yogurt-cup',
-    {
-      ...emptyTargeting(),
-      audienceTags: [{ tag: 'postWorkout', priority: 'required' }],
-      foodInterests: [{ name: 'Greek Yogurt', priority: 'required' }],
-      exclusions: ['dairy'],
-    },
-    103,
-    'paused',
-    950
+  add(
+    makeAd(
+      'a3',
+      'c1',
+      'Greek Yogurt Recovery Cup',
+      'Quick post-lift refuel. 22g protein, honey, and granola crunch.',
+      'https://uplate.app/order/greek-yogurt-cup',
+      {
+        ...emptyTargeting(),
+        audienceTags: [{ tag: 'postWorkout', priority: 'required' }],
+        foodInterests: [{ name: 'Greek Yogurt', priority: 'required' }],
+        exclusions: ['dairy'],
+      },
+      103,
+      'paused',
+      40,
+      'diningHallMenu',
+    ),
   );
 
   // Campaign 2: Vegan Lunch Boost
@@ -177,47 +357,52 @@ export function buildSeedState(): AppState {
   campaigns[c2.id] = c2;
   campaignOrder.push(c2.id);
 
-  ads['a4'] = makeAd(
-    'a4',
-    'c2',
-    'Smoky Tofu Buddha Bowl',
-    'Marinated tofu, brown rice, roasted veg, tahini drizzle.',
-    'https://uplate.app/order/tofu-buddha-bowl',
-    {
-      ...emptyTargeting(),
-      audienceTags: [
-        { tag: 'macroFriendly', priority: 'medium' },
-        { tag: 'lowCalorie', priority: 'low' },
-      ],
-      dietary: [
-        { pref: 'vegan', priority: 'required' },
-        { pref: 'glutenFree', priority: 'medium' },
-      ],
-      foodInterests: [
-        { name: 'Tofu Stir-Fry', priority: 'high' },
-        { name: 'Rice Bowl', priority: 'medium' },
-      ],
-      time: { range: { startHour: 11, endHour: 14 }, days: ['mon', 'tue', 'wed', 'thu', 'fri'] },
-    },
-    201,
-    'active',
-    1600
+  add(
+    makeAd(
+      'a4',
+      'c2',
+      'Smoky Tofu Buddha Bowl',
+      'Marinated tofu, brown rice, roasted veg, tahini drizzle.',
+      'https://uplate.app/order/tofu-buddha-bowl',
+      {
+        ...emptyTargeting(),
+        audienceTags: [
+          { tag: 'macroFriendly', priority: 'medium' },
+          { tag: 'lowCalorie', priority: 'low' },
+        ],
+        dietary: [
+          { pref: 'vegan', priority: 'required' },
+          { pref: 'glutenFree', priority: 'medium' },
+        ],
+        foodInterests: [
+          { name: 'Tofu Stir-Fry', priority: 'high' },
+          { name: 'Rice Bowl', priority: 'medium' },
+        ],
+        time: { range: { startHour: 11, endHour: 14 }, days: ['mon', 'tue', 'wed', 'thu', 'fri'] },
+      },
+      201,
+      'active',
+      55,
+    ),
   );
-  ads['a5'] = makeAd(
-    'a5',
-    'c2',
-    'Falafel Power Wrap',
-    'Crispy falafel, hummus, pickled veg in a spinach wrap.',
-    'https://uplate.app/order/falafel-wrap',
-    {
-      ...emptyTargeting(),
-      audienceTags: [{ tag: 'highProtein', priority: 'medium' }],
-      dietary: [{ pref: 'vegetarian', priority: 'high' }, { pref: 'vegan', priority: 'medium' }],
-      foodInterests: [{ name: 'Falafel', priority: 'required' }],
-    },
-    202,
-    'active',
-    1100
+  add(
+    makeAd(
+      'a5',
+      'c2',
+      'Falafel Power Wrap',
+      'Crispy falafel, hummus, pickled veg in a spinach wrap.',
+      'https://uplate.app/order/falafel-wrap',
+      {
+        ...emptyTargeting(),
+        audienceTags: [{ tag: 'highProtein', priority: 'medium' }],
+        dietary: [{ pref: 'vegetarian', priority: 'high' }, { pref: 'vegan', priority: 'medium' }],
+        foodInterests: [{ name: 'Falafel', priority: 'required' }],
+      },
+      202,
+      'active',
+      45,
+      'diningHallMenu',
+    ),
   );
 
   // Campaign 3: Late-Night Study Fuel
@@ -234,40 +419,44 @@ export function buildSeedState(): AppState {
   campaigns[c3.id] = c3;
   campaignOrder.push(c3.id);
 
-  ads['a6'] = makeAd(
-    'a6',
-    'c3',
-    'Midnight Ramen Bowl',
-    'Slow-simmered broth, chashu pork, soft egg. Open till 2am.',
-    'https://uplate.app/order/midnight-ramen',
-    {
-      ...emptyTargeting(),
-      audienceTags: [{ tag: 'highCarb', priority: 'high' }],
-      foodInterests: [{ name: 'Ramen', priority: 'required' }],
-      behavioral: { recurringCustomer: true, recurringPriority: 'high' },
-      time: { range: { startHour: 21, endHour: 2 }, days: ['thu', 'fri', 'sat'] },
-    },
-    301,
-    'paused',
-    1300
+  add(
+    makeAd(
+      'a6',
+      'c3',
+      'Midnight Ramen Bowl',
+      'Slow-simmered broth, chashu pork, soft egg. Open till 2am.',
+      'https://uplate.app/order/midnight-ramen',
+      {
+        ...emptyTargeting(),
+        audienceTags: [{ tag: 'highCarb', priority: 'high' }],
+        foodInterests: [{ name: 'Ramen', priority: 'required' }],
+        behavioral: { recurringCustomer: true, recurringPriority: 'high' },
+        time: { range: { startHour: 21, endHour: 2 }, days: ['thu', 'fri', 'sat'] },
+      },
+      301,
+      'paused',
+      50,
+    ),
   );
-  ads['a7'] = makeAd(
-    'a7',
-    'c3',
-    'Iced Matcha + Croissant',
-    'Caffeine without the jitters. Pair with a buttery croissant.',
-    'https://uplate.app/order/matcha-croissant',
-    {
-      ...emptyTargeting(),
-      foodInterests: [
-        { name: 'Matcha Latte', priority: 'high' },
-        { name: 'Croissant', priority: 'high' },
-      ],
-      behavioral: { recurringCustomer: true, recurringPriority: 'medium' },
-    },
-    302,
-    'active',
-    900
+  add(
+    makeAd(
+      'a7',
+      'c3',
+      'Iced Matcha + Croissant',
+      'Caffeine without the jitters. Pair with a buttery croissant.',
+      'https://uplate.app/order/matcha-croissant',
+      {
+        ...emptyTargeting(),
+        foodInterests: [
+          { name: 'Matcha Latte', priority: 'high' },
+          { name: 'Croissant', priority: 'high' },
+        ],
+        behavioral: { recurringCustomer: true, recurringPriority: 'medium' },
+      },
+      302,
+      'active',
+      40,
+    ),
   );
 
   // Campaign 4: Macro-Friendly Breakfast
@@ -284,50 +473,57 @@ export function buildSeedState(): AppState {
   campaigns[c4.id] = c4;
   campaignOrder.push(c4.id);
 
-  ads['a8'] = makeAd(
-    'a8',
-    'c4',
-    'Steel-Cut Oat Builder',
-    'Pick your protein and 3 toppings. Hot, balanced, under 480 cal.',
-    'https://uplate.app/order/oat-builder',
-    {
-      ...emptyTargeting(),
-      audienceTags: [
-        { tag: 'macroFriendly', priority: 'required' },
-        { tag: 'lowCalorie', priority: 'high' },
-      ],
-      foodInterests: [{ name: 'Oat Bowl', priority: 'high' }],
-      time: { range: { startHour: 7, endHour: 11 }, days: ['mon', 'tue', 'wed', 'thu', 'fri'] },
-    },
-    401,
-    'active',
-    1500
+  add(
+    makeAd(
+      'a8',
+      'c4',
+      'Steel-Cut Oat Builder',
+      'Pick your protein and 3 toppings. Hot, balanced, under 480 cal.',
+      'https://uplate.app/order/oat-builder',
+      {
+        ...emptyTargeting(),
+        audienceTags: [
+          { tag: 'macroFriendly', priority: 'required' },
+          { tag: 'lowCalorie', priority: 'high' },
+        ],
+        foodInterests: [{ name: 'Oat Bowl', priority: 'high' }],
+        time: { range: { startHour: 7, endHour: 11 }, days: ['mon', 'tue', 'wed', 'thu', 'fri'] },
+      },
+      401,
+      'active',
+      50,
+    ),
   );
-  ads['a9'] = makeAd(
-    'a9',
-    'c4',
-    'Avocado Toast + Egg',
-    'Sourdough, smashed avocado, soft-poached egg, chili crisp.',
-    'https://uplate.app/order/avocado-toast',
-    {
-      ...emptyTargeting(),
-      audienceTags: [{ tag: 'highProtein', priority: 'medium' }],
-      dietary: [{ pref: 'vegetarian', priority: 'medium' }],
-      foodInterests: [
-        { name: 'Avocado Toast', priority: 'required' },
-        { name: 'Cold Brew', priority: 'medium' },
-      ],
-      time: { range: { startHour: 7, endHour: 12 }, days: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] },
-    },
-    402,
-    'active',
-    1700
+  add(
+    makeAd(
+      'a9',
+      'c4',
+      'Avocado Toast + Egg',
+      'Sourdough, smashed avocado, soft-poached egg, chili crisp.',
+      'https://uplate.app/order/avocado-toast',
+      {
+        ...emptyTargeting(),
+        audienceTags: [{ tag: 'highProtein', priority: 'medium' }],
+        dietary: [{ pref: 'vegetarian', priority: 'medium' }],
+        foodInterests: [
+          { name: 'Avocado Toast', priority: 'required' },
+          { name: 'Cold Brew', priority: 'medium' },
+        ],
+        time: { range: { startHour: 7, endHour: 12 }, days: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] },
+      },
+      402,
+      'active',
+      55,
+    ),
   );
 
   return {
     campaigns,
     ads,
+    events,
     campaignOrder,
     restaurant: { name: 'Boiler Bowl Co.' },
   };
 }
+
+export { metricsFromEvents };

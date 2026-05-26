@@ -1,58 +1,152 @@
-import { ArrowRight, ImageIcon, Salad } from 'lucide-react';
-import type { Ad } from '../../types';
+import { ArrowRight, Salad } from 'lucide-react';
+import type { Ad, AdLocation } from '../../types';
 import { useApp } from '../../store/AppContext';
 
 interface AdPreviewProps {
-  ad: Pick<Ad, 'title' | 'description' | 'creativeUrl' | 'redirectUrl' | 'iconUrl'>;
-  compact?: boolean;
+  ad: Pick<Ad, 'title' | 'description' | 'creativeUrl' | 'redirectUrl' | 'iconUrl'> & {
+    location?: AdLocation;
+  };
+  showLabel?: boolean;
 }
 
-export function AdPreview({ ad, compact }: AdPreviewProps) {
+export function AdPreview({ ad, showLabel = true }: AdPreviewProps) {
   const { state } = useApp();
   const iconUrl = ad.iconUrl ?? state.restaurant.iconUrl;
   const restaurantName = state.restaurant.name ?? 'Your Restaurant';
-  if (compact) {
+  const location: AdLocation = ad.location ?? 'homeScreen';
+
+  if (location === 'diningHallMenu') {
     return (
       <div
         style={{
-          aspectRatio: '16 / 9',
-          background: 'linear-gradient(135deg, var(--accent-20), var(--accent-12))',
-          borderRadius: 'var(--r-md)',
+          background: 'transparent',
           display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          color: 'var(--accent)',
-          position: 'relative',
-          overflow: 'hidden',
+          flexDirection: 'column',
+          gap: 'var(--s-3)',
         }}
       >
-        {ad.creativeUrl ? (
-          <img src={ad.creativeUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-        ) : (
-          <ImageIcon size={28} />
+        {showLabel && (
+          <span
+            style={{
+              fontSize: 11,
+              color: 'var(--text-soft)',
+              fontWeight: 600,
+              letterSpacing: 0.3,
+              textTransform: 'uppercase',
+            }}
+          >
+            Live Preview · Dining Hall Menu
+          </span>
         )}
         <div
           style={{
-            position: 'absolute',
-            top: 6,
-            left: 6,
-            width: 22,
-            height: 22,
-            borderRadius: 'var(--r-pill)',
-            background: 'var(--surface)',
-            color: 'var(--accent)',
-            display: 'inline-flex',
+            width: '100%',
+            borderRadius: 14,
+            background: '#0d121e',
+            border: '1px solid rgba(255,255,255,0.06)',
+            padding: 10,
+            color: '#ffffff',
+            display: 'flex',
             alignItems: 'center',
-            justifyContent: 'center',
-            boxShadow: 'var(--shadow-sm)',
+            gap: 10,
+            position: 'relative',
             overflow: 'hidden',
+            boxShadow: 'var(--shadow-md)',
           }}
         >
-          {iconUrl ? (
-            <img src={iconUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-          ) : (
-            <Salad size={12} />
-          )}
+          <div
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: '50%',
+              overflow: 'hidden',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+              background: 'rgba(168, 185, 232, 0.2)',
+            }}
+          >
+            {iconUrl ? (
+              <img
+                src={iconUrl}
+                alt=""
+                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+              />
+            ) : (
+              <Salad size={22} color="#a8b9e8" />
+            )}
+          </div>
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              flex: 1,
+              minWidth: 0,
+            }}
+          >
+            <div
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 5,
+                minWidth: 0,
+              }}
+            >
+              <span
+                style={{
+                  width: 5,
+                  height: 5,
+                  borderRadius: '50%',
+                  background: '#a8b9e8',
+                  display: 'inline-block',
+                  flexShrink: 0,
+                }}
+              />
+              <span
+                style={{
+                  fontSize: 9,
+                  fontWeight: 700,
+                  letterSpacing: 0.6,
+                  color: '#a8b9e8',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  minWidth: 0,
+                }}
+              >
+                SPONSORED{restaurantName ? ` · ${restaurantName}` : ''}
+              </span>
+            </div>
+            <div style={{ height: 3 }} />
+            <span
+              style={{
+                fontSize: 14,
+                fontWeight: 700,
+                lineHeight: 1.2,
+                color: '#ffffff',
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+              }}
+            >
+              {ad.title || 'Your ad title'}
+            </span>
+          </div>
+          <div
+            style={{
+              width: 44,
+              height: 36,
+              borderRadius: 18,
+              background: '#a8b9e8',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+            }}
+          >
+            <ArrowRight size={16} color="#ffffff" strokeWidth={2.5} />
+          </div>
         </div>
       </div>
     );
@@ -67,17 +161,19 @@ export function AdPreview({ ad, compact }: AdPreviewProps) {
         gap: 'var(--s-3)',
       }}
     >
-      <span
-        style={{
-          fontSize: 11,
-          color: 'var(--text-soft)',
-          fontWeight: 600,
-          letterSpacing: 0.3,
-          textTransform: 'uppercase',
-        }}
-      >
-        Live Preview
-      </span>
+      {showLabel && (
+        <span
+          style={{
+            fontSize: 11,
+            color: 'var(--text-soft)',
+            fontWeight: 600,
+            letterSpacing: 0.3,
+            textTransform: 'uppercase',
+          }}
+        >
+          Live Preview · Home Screen
+        </span>
+      )}
       <div
         style={{
           width: '100%',

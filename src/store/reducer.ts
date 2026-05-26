@@ -48,11 +48,13 @@ export function reducer(state: AppState, action: Action): AppState {
       const nextCampaigns = { ...state.campaigns };
       delete nextCampaigns[id];
       const nextAds = { ...state.ads };
+      const deletedAdIds = new Set(c.adIds);
       for (const adId of c.adIds) delete nextAds[adId];
       return {
         ...state,
         campaigns: nextCampaigns,
         ads: nextAds,
+        events: state.events.filter((e) => !deletedAdIds.has(e.adId)),
         campaignOrder: state.campaignOrder.filter((cid) => cid !== id),
       };
     }
@@ -117,7 +119,12 @@ export function reducer(state: AppState, action: Action): AppState {
             [c.id]: { ...c, adIds: c.adIds.filter((x) => x !== id), updatedAt: nowIso() },
           }
         : state.campaigns;
-      return { ...state, ads: nextAds, campaigns: nextCampaigns };
+      return {
+        ...state,
+        ads: nextAds,
+        campaigns: nextCampaigns,
+        events: state.events.filter((e) => e.adId !== id),
+      };
     }
     case 'AD_DUPLICATE': {
       const { newAd, targetCampaignId } = action.payload;

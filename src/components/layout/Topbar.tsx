@@ -1,4 +1,6 @@
-
+import { LogOut } from 'lucide-react';
+import { Button } from '../ui/Button';
+import { useAuth } from '../../auth/AuthContext';
 
 interface TopbarProps {
   title: string;
@@ -6,6 +8,8 @@ interface TopbarProps {
 }
 
 export function Topbar({ title, subtitle }: TopbarProps) {
+  const { user, signOut } = useAuth();
+
   return (
     <header
       style={{
@@ -25,7 +29,19 @@ export function Topbar({ title, subtitle }: TopbarProps) {
         )}
       </div>
 
-  
+      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 'var(--s-3)' }}>
+        {user?.email && (
+          <span style={{ fontSize: 12, color: 'var(--text-soft)' }}>{user.email}</span>
+        )}
+        <Button
+          variant="ghost"
+          size="sm"
+          iconLeft={<LogOut size={14} />}
+          onClick={() => void signOut()}
+        >
+          Sign out
+        </Button>
+      </div>
     </header>
   );
 }

@@ -6,6 +6,8 @@ import { TextField, TextArea, SelectField } from '../ui/Field';
 import { useApp } from '../../store/AppContext';
 import { campaignsInOrder } from '../../store/selectors';
 import { newAdSkeleton } from '../../lib/clone';
+import { AD_LOCATIONS } from '../../data/constants';
+import type { AdLocation } from '../../types';
 
 interface AdCreateDialogProps {
   open: boolean;
@@ -25,6 +27,7 @@ export function AdCreateDialog({ open, onClose, campaignId }: AdCreateDialogProp
   const [creativeUrl, setCreativeUrl] = useState('');
   const [iconUrl, setIconUrl] = useState('');
   const [target, setTarget] = useState(campaignId ?? firstCampaignId);
+  const [location, setLocation] = useState<AdLocation>('homeScreen');
 
   useEffect(() => {
     if (!open) return;
@@ -34,6 +37,7 @@ export function AdCreateDialog({ open, onClose, campaignId }: AdCreateDialogProp
     setCreativeUrl('');
     setIconUrl('');
     setTarget(campaignId ?? firstCampaignId);
+    setLocation('homeScreen');
     // Intentionally only reset when the dialog opens — depending on `campaigns`
     // or `firstCampaignId` would clobber the user's typing on every keystroke.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -51,6 +55,7 @@ export function AdCreateDialog({ open, onClose, campaignId }: AdCreateDialogProp
       redirectUrl: redirectUrl.trim(),
       creativeUrl: creativeUrl.trim() || undefined,
       iconUrl: iconUrl.trim() || undefined,
+      location,
     };
     dispatch({ type: 'AD_CREATE', payload: ad });
     onClose();
@@ -106,6 +111,13 @@ export function AdCreateDialog({ open, onClose, campaignId }: AdCreateDialogProp
         value={iconUrl}
         onChange={(e) => setIconUrl(e.target.value)}
         placeholder="https://…"
+      />
+      <SelectField
+        label="Ad location"
+        hint="Where this ad will appear. An ad can only be in one location."
+        value={location}
+        onChange={(e) => setLocation(e.target.value as AdLocation)}
+        options={AD_LOCATIONS.map((l) => ({ value: l.value, label: l.label }))}
       />
       {!campaignId && (
         <SelectField

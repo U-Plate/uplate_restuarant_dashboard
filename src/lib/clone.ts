@@ -21,6 +21,7 @@ export function newAdSkeleton(campaignId: string): Ad {
     description: '',
     redirectUrl: '',
     status: 'paused',
+    location: 'homeScreen',
     targeting: emptyTargeting(),
     metrics: { impressions: 0, clicks: 0, series: [] },
     createdAt: now,

@@ -9,6 +9,7 @@ import { useApp } from '../../store/AppContext';
 import { adCtr } from '../../store/selectors';
 import { formatNumber, formatPercent } from '../../lib/format';
 import { cloneAd } from '../../lib/clone';
+import { AD_LOCATION_LABEL } from '../../data/constants';
 
 interface AdCardProps {
   ad: Ad;
@@ -43,7 +44,7 @@ export function AdCard({ ad, onDeleteRequest, onDuplicateAcross, showCampaign }:
   };
 
   return (
-    <Card padding="var(--s-4)">
+    <Card padding="var(--s-4)" style={{ height: '100%' }}>
       <div
         onClick={openAd}
         role="button"
@@ -54,9 +55,27 @@ export function AdCard({ ad, onDeleteRequest, onDuplicateAcross, showCampaign }:
             openAd();
           }
         }}
-        style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s-3)', cursor: 'pointer' }}
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 'var(--s-3)',
+          cursor: 'pointer',
+          height: '100%',
+        }}
       >
-        <AdPreview ad={ad} compact />
+        <div
+          style={{
+            flex: 1,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            minHeight: 0,
+          }}
+        >
+          <div style={{ width: '100%' }}>
+            <AdPreview ad={ad} showLabel={false} />
+          </div>
+        </div>
         <div
           style={{
             display: 'flex',
@@ -82,6 +101,7 @@ export function AdCard({ ad, onDeleteRequest, onDuplicateAcross, showCampaign }:
               <Badge tone={isActive ? 'active' : 'paused'} withDot>
                 {isActive ? 'Active' : 'Paused'}
               </Badge>
+              <Badge tone="neutral">{AD_LOCATION_LABEL[ad.location]}</Badge>
               {showCampaign && campaign && (
                 <span style={{ fontSize: 11, color: 'var(--text-soft)' }}>{campaign.name}</span>
               )}

@@ -1,11 +1,14 @@
 import { Card } from '../ui/Card';
-import { TextField, TextArea } from '../ui/Field';
-import type { Ad } from '../../types';
+import { TextField, TextArea, SelectField } from '../ui/Field';
+import type { Ad, AdLocation } from '../../types';
+import { AD_LOCATIONS } from '../../data/constants';
 
 interface AdFormProps {
-  value: Pick<Ad, 'title' | 'description' | 'redirectUrl' | 'creativeUrl' | 'iconUrl'>;
+  value: Pick<Ad, 'title' | 'description' | 'redirectUrl' | 'creativeUrl' | 'iconUrl' | 'location'>;
   onChange: (
-    patch: Partial<Pick<Ad, 'title' | 'description' | 'redirectUrl' | 'creativeUrl' | 'iconUrl'>>,
+    patch: Partial<
+      Pick<Ad, 'title' | 'description' | 'redirectUrl' | 'creativeUrl' | 'iconUrl' | 'location'>
+    >,
   ) => void;
 }
 
@@ -14,6 +17,13 @@ export function AdForm({ value, onChange }: AdFormProps) {
     <Card padding="var(--s-5)">
       <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s-4)' }}>
         <SectionTitle title="Ad Design" />
+        <SelectField
+          label="Ad location"
+          hint="Where this ad will appear. An ad can only be in one location."
+          value={value.location}
+          onChange={(e) => onChange({ location: e.target.value as AdLocation })}
+          options={AD_LOCATIONS.map((l) => ({ value: l.value, label: l.label }))}
+        />
         <TextField
           label="Title"
           value={value.title}

@@ -29,6 +29,8 @@ export type DayOfWeek = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
 
 export type Status = 'active' | 'paused';
 
+export type AdLocation = 'homeScreen' | 'diningHallMenu';
+
 export interface AudienceTagRule {
   tag: AudienceTag;
   priority: Priority;
@@ -80,6 +82,26 @@ export interface AdMetrics {
   series: AnalyticsPoint[];
 }
 
+export type AdEventType = 'impression' | 'click';
+
+// One row per impression or click. Multi-valued audience signals
+// (tags / dietary / foodInterests) snapshot what the viewer matched at the
+// moment of the event — same shape the wire contract documents in
+// backend.md (`ad_events` + `ad_event_tags` / `ad_event_dietary` /
+// `ad_event_food_interests`). All analytics aggregates in the app fall out
+// of GROUP BY over these rows.
+export interface AdEvent {
+  id: string;
+  adId: string;
+  type: AdEventType;
+  occurredAt: string; // ISO timestamp
+  userId?: string;
+  recurringCustomer: boolean;
+  tags: AudienceTag[];
+  dietary: DietaryPreference[];
+  foodInterests: string[];
+}
+
 export interface Ad {
   id: string;
   campaignId: string;
@@ -89,6 +111,7 @@ export interface Ad {
   creativeUrl?: string;
   iconUrl?: string;
   status: Status;
+  location: AdLocation;
   targeting: Targeting;
   metrics: AdMetrics;
   createdAt: string;
@@ -114,6 +137,7 @@ export interface Campaign {
 export interface AppState {
   campaigns: Record<string, Campaign>;
   ads: Record<string, Ad>;
+  events: AdEvent[];
   campaignOrder: string[];
   restaurant: RestaurantProfile;
 }
