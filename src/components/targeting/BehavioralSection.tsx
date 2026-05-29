@@ -1,5 +1,5 @@
-import { Repeat } from 'lucide-react';
-import { SectionShell } from './SectionShell';
+import { Users } from 'lucide-react';
+import { TargetingSection } from './TargetingSection';
 import { Toggle } from '../ui/Toggle';
 import { PrioritySelector } from '../ui/PrioritySelector';
 import type { BehavioralTargeting } from '../../types';
@@ -7,31 +7,30 @@ import type { BehavioralTargeting } from '../../types';
 interface Props {
   value: BehavioralTargeting;
   onChange: (next: BehavioralTargeting) => void;
+  isOpen: boolean;
+  onToggle: () => void;
 }
 
-export function BehavioralSection({ value, onChange }: Props) {
+export function BehavioralSection({ value, onChange, isOpen, onToggle }: Props) {
+  const summary = value.recurringCustomer ? 'Recurring customers' : 'Anyone';
+  const isEmpty = !value.recurringCustomer;
+
   return (
-    <SectionShell
-      icon={<Repeat size={16} />}
-      title="Behavioral signals"
-      hint="Boost ranking for users who have ordered from you before."
+    <TargetingSection
+      icon={<Users size={14} />}
+      eyebrow="Who"
+      hint="Target users who have ordered with you before."
+      summary={summary}
+      isOpen={isOpen}
+      onToggle={onToggle}
+      isEmpty={isEmpty}
+      emptyCta="Choose audience"
     >
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: 'var(--s-3) var(--s-4)',
-          background: 'var(--surface-2)',
-          borderRadius: 'var(--r-md)',
-        }}
-      >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>
-            Recurring customers
-          </span>
-          <span style={{ fontSize: 11, color: 'var(--text-soft)' }}>
-            Prioritize repeat orderers from your restaurant
+      <div className="uplate-targeting__toggle-row">
+        <div className="uplate-targeting__toggle-meta">
+          <span className="uplate-targeting__rulename">Recurring customers</span>
+          <span className="uplate-targeting__rulehint">
+            Prioritize repeat orderers from your restaurant.
           </span>
         </div>
         <Toggle
@@ -41,27 +40,14 @@ export function BehavioralSection({ value, onChange }: Props) {
       </div>
 
       {value.recurringCustomer && (
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 'var(--s-3)',
-            padding: 'var(--s-3) var(--s-4)',
-            background: 'var(--surface-2)',
-            borderRadius: 'var(--r-md)',
-            flexWrap: 'wrap',
-          }}
-        >
-          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>
-            Boost priority
-          </span>
+        <div className="uplate-targeting__rule">
+          <span className="uplate-targeting__rulename">Boost priority</span>
           <PrioritySelector
             value={value.recurringPriority}
             onChange={(next) => onChange({ ...value, recurringPriority: next })}
           />
         </div>
       )}
-    </SectionShell>
+    </TargetingSection>
   );
 }

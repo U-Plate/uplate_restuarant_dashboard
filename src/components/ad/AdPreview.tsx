@@ -3,7 +3,7 @@ import type { Ad, AdLocation } from '../../types';
 import { useApp } from '../../store/AppContext';
 
 interface AdPreviewProps {
-  ad: Pick<Ad, 'title' | 'description' | 'creativeUrl' | 'redirectUrl' | 'iconUrl'> & {
+  ad: Pick<Ad, 'title' | 'description' | 'redirectUrl' | 'iconUrl'> & {
     location?: AdLocation;
   };
   showLabel?: boolean;
@@ -334,26 +334,6 @@ export function AdPreview({ ad, showLabel = true }: AdPreviewProps) {
             <ArrowRight size={14} color="#ffffff" strokeWidth={2.5} />
           </div>
         </div>
-
-        {ad.creativeUrl && (
-          <>
-            <div style={{ height: 12 }} />
-            <div
-              style={{
-                width: '100%',
-                borderRadius: 10,
-                overflow: 'hidden',
-                aspectRatio: '16 / 9',
-              }}
-            >
-              <img
-                src={ad.creativeUrl}
-                alt=""
-                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-              />
-            </div>
-          </>
-        )}
       </div>
     </div>
   );

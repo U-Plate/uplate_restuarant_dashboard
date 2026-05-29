@@ -1,5 +1,5 @@
 import { Target } from 'lucide-react';
-import { SectionShell } from './SectionShell';
+import { TargetingSection } from './TargetingSection';
 import { Chip } from '../ui/Chip';
 import { PrioritySelector } from '../ui/PrioritySelector';
 import { AUDIENCE_TAGS } from '../../data/constants';
@@ -8,18 +8,25 @@ import type { AudienceTagRule, Targeting } from '../../types';
 interface Props {
   value: AudienceTagRule[];
   onChange: (next: Targeting['audienceTags']) => void;
+  isOpen: boolean;
+  onToggle: () => void;
 }
 
-export function AudienceTagSection({ value, onChange }: Props) {
+export function AudienceTagSection({ value, onChange, isOpen, onToggle }: Props) {
   const selectedSet = new Set(value.map((v) => v.tag));
+  const summary = summarize(value);
 
   return (
-    <SectionShell
-      icon={<Target size={16} />}
-      title="Audience tags"
-      hint="Behavioral nutrition signals. Higher priority increases ranking influence."
+    <TargetingSection
+      icon={<Target size={14} />}
+      eyebrow="Nutrition signals"
+      hint="Behavioral nutrition tags the matching engine ranks against."
+      summary={summary}
+      isOpen={isOpen}
+      onToggle={onToggle}
+      isEmpty={value.length === 0}
     >
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+      <div className="uplate-targeting__chips">
         {AUDIENCE_TAGS.map((tag) => {
           const selected = selectedSet.has(tag.value);
           return (
@@ -41,34 +48,16 @@ export function AudienceTagSection({ value, onChange }: Props) {
       </div>
 
       {value.length > 0 && (
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 'var(--s-2)',
-            padding: 'var(--s-3) var(--s-4)',
-            background: 'var(--surface-2)',
-            borderRadius: 'var(--r-md)',
-          }}
-        >
+        <div className="uplate-targeting__rules">
           {value.map((rule) => {
             const meta = AUDIENCE_TAGS.find((t) => t.value === rule.tag);
             return (
-              <div
-                key={rule.tag}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: 'var(--s-3)',
-                  flexWrap: 'wrap',
-                }}
-              >
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>
-                    {meta?.label ?? rule.tag}
-                  </span>
-                  <span style={{ fontSize: 11, color: 'var(--text-soft)' }}>{meta?.hint}</span>
+              <div key={rule.tag} className="uplate-targeting__rule">
+                <div className="uplate-targeting__rulemeta">
+                  <span className="uplate-targeting__rulename">{meta?.label ?? rule.tag}</span>
+                  {meta?.hint && (
+                    <span className="uplate-targeting__rulehint">{meta.hint}</span>
+                  )}
                 </div>
                 <PrioritySelector
                   value={rule.priority}
@@ -81,6 +70,15 @@ export function AudienceTagSection({ value, onChange }: Props) {
           })}
         </div>
       )}
-    </SectionShell>
+    </TargetingSection>
   );
+}
+
+function summarize(value: AudienceTagRule[]): string {
+  if (value.length === 0) return '';
+  const labels = value
+    .slice(0, 4)
+    .map((r) => AUDIENCE_TAGS.find((t) => t.value === r.tag)?.label ?? r.tag);
+  const more = value.length - labels.length;
+  return labels.join(', ') + (more > 0 ? `, and ${more} more` : '');
 }

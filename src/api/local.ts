@@ -188,7 +188,6 @@ function toRestaurantProfile(state: AppState): RestaurantProfile {
     notifications: stored.notifications ?? {
       weekly: true,
       emailAlerts: true,
-      smsAlerts: false,
     },
     createdAt: nowIso(),
     updatedAt: nowIso(),
@@ -423,7 +422,6 @@ export function createLocalClient(): ApiClient {
           title: input.title,
           description: input.description ?? '',
           redirectUrl: input.redirectUrl ?? '',
-          creativeUrl: input.creativeUrl,
           iconUrl: input.iconUrl,
           status: input.status ?? 'paused',
           location: input.location ?? 'homeScreen',
@@ -455,7 +453,6 @@ export function createLocalClient(): ApiClient {
           title: input.title,
           description: input.description,
           redirectUrl: input.redirectUrl,
-          creativeUrl: input.creativeUrl ?? undefined,
           iconUrl: input.iconUrl ?? undefined,
           location: input.location,
           status: input.status,
@@ -475,7 +472,6 @@ export function createLocalClient(): ApiClient {
         const next: Ad = {
           ...existing,
           ...input,
-          creativeUrl: input.creativeUrl ?? existing.creativeUrl,
           iconUrl: input.iconUrl ?? existing.iconUrl,
           campaignId: input.campaignId ?? existing.campaignId,
           updatedAt: nowIso(),
@@ -693,7 +689,50 @@ export function createLocalClient(): ApiClient {
           }
         }
         const max = Math.max(1, ...cells);
-        return { tagUsage, dietaryUsage, heatmap: { cells, perDayAdCount, max } };
+
+        // Real-impressions heatmap: distribute each ad's lifetime impressions
+        // across the day-hour cells the ad is configured to serve in. This
+        // is a defensible approximation given the local adapter has no
+        // per-event timestamps for impressions. Real backend will replace
+        // this with a true `count(*) GROUP BY dow, hour` aggregation.
+        const impressionsCells = Array.from({ length: 7 * 24 }, () => 0);
+        let totalImpressions = 0;
+        for (const ad of Object.values(state.ads)) {
+          const adImpressions = ad.metrics.impressions;
+          if (adImpressions === 0) continue;
+          totalImpressions += adImpressions;
+          const range = ad.targeting.time.range;
+          const adDays = ad.targeting.time.days.length > 0 ? ad.targeting.time.days : days;
+          const start = range?.startHour ?? 0;
+          const end = range?.endHour ?? 24;
+          const hourSpans: Array<[number, number]> = [];
+          if (end >= start) hourSpans.push([start, end || 24]);
+          else {
+            hourSpans.push([start, 24]);
+            hourSpans.push([0, end]);
+          }
+          const totalCells = adDays.length * hourSpans.reduce((acc, [a, b]) => acc + (b - a), 0);
+          if (totalCells === 0) continue;
+          const perCell = adImpressions / totalCells;
+          for (const d of adDays) {
+            const rIdx = days.indexOf(d);
+            if (rIdx < 0) continue;
+            for (const [a, b] of hourSpans) {
+              for (let h = a; h < b; h++) impressionsCells[rIdx * 24 + h] += perCell;
+            }
+          }
+        }
+        const impressionsMax = Math.max(1, ...impressionsCells);
+
+        return {
+          tagUsage,
+          dietaryUsage,
+          heatmap: { cells, perDayAdCount, max },
+          impressionsHeatmap:
+            totalImpressions > 0
+              ? { cells: impressionsCells, max: impressionsMax, totalImpressions }
+              : undefined,
+        };
       },
 
       clickSignals: async (adId): Promise<ClickSignalsResponse> => {

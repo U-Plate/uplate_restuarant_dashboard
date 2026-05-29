@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { X } from 'lucide-react';
 
 interface ModalProps {
@@ -10,14 +10,45 @@ interface ModalProps {
   footer?: ReactNode;
 }
 
-export function Modal({ open, onClose, title, children, width = 520, footer }: ModalProps) {
+const FOCUSABLE_SELECTOR =
+  'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+
+export function Modal({ open, onClose, title, children, width = 480, footer }: ModalProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+        return;
+      }
+      if (e.key === 'Tab' && containerRef.current) {
+        const focusables = Array.from(
+          containerRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+        ).filter((el) => !el.hasAttribute('disabled'));
+        if (focusables.length === 0) return;
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
     };
     window.addEventListener('keydown', onKey);
     document.body.style.overflow = 'hidden';
+
+    const focusables = containerRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR);
+    const firstInput = Array.from(focusables ?? []).find(
+      (el) => el.tagName === 'INPUT' || el.tagName === 'SELECT' || el.tagName === 'TEXTAREA',
+    );
+    (firstInput ?? focusables?.[0])?.focus();
+
     return () => {
       window.removeEventListener('keydown', onKey);
       document.body.style.overflow = '';
@@ -29,80 +60,33 @@ export function Modal({ open, onClose, title, children, width = 520, footer }: M
   return (
     <div
       onClick={onClose}
-      style={{
-        position: 'fixed',
-        inset: 0,
-        background: 'rgba(52, 63, 62, 0.32)',
-        backdropFilter: 'blur(4px)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        zIndex: 100,
-        padding: 'var(--s-4)',
-      }}
+      className="uplate-modal__backdrop"
+      role="presentation"
     >
       <div
+        ref={containerRef}
         onClick={(e) => e.stopPropagation()}
-        style={{
-          background: 'var(--surface)',
-          borderRadius: 'var(--r-xl)',
-          boxShadow: 'var(--shadow-lg)',
-          width: '100%',
-          maxWidth: width,
-          maxHeight: '90vh',
-          display: 'flex',
-          flexDirection: 'column',
-          overflow: 'hidden',
-        }}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        className="uplate-modal"
+        style={{ maxWidth: width }}
       >
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: 'var(--s-5) var(--s-5) var(--s-3)',
-          }}
-        >
-          <h3 style={{ fontSize: 18, fontWeight: 600 }}>{title}</h3>
-          <button
-            type="button"
-            onClick={onClose}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: 'var(--text-soft)',
-              padding: 6,
-              borderRadius: 'var(--r-sm)',
-              display: 'inline-flex',
-            }}
-          >
-            <X size={18} />
-          </button>
-        </div>
-        <div
-          style={{
-            padding: '0 var(--s-5) var(--s-5)',
-            overflowY: 'auto',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 'var(--s-4)',
-          }}
-        >
-          {children}
-        </div>
-        {footer && (
-          <div
-            style={{
-              padding: 'var(--s-4) var(--s-5)',
-              background: 'var(--surface-2)',
-              display: 'flex',
-              justifyContent: 'flex-end',
-              gap: 'var(--s-2)',
-            }}
-          >
-            {footer}
-          </div>
+        {title && (
+          <header className="uplate-modal__head">
+            <h2 className="uplate-modal__title">{title}</h2>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close"
+              className="uplate-modal__close"
+            >
+              <X size={16} strokeWidth={2} />
+            </button>
+          </header>
         )}
+        <div className="uplate-modal__body">{children}</div>
+        {footer && <div className="uplate-modal__footer">{footer}</div>}
       </div>
     </div>
   );

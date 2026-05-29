@@ -1,5 +1,5 @@
-import { Ban } from 'lucide-react';
-import { SectionShell } from './SectionShell';
+import { ShieldAlert } from 'lucide-react';
+import { TargetingSection } from './TargetingSection';
 import { Chip } from '../ui/Chip';
 import { ALLERGIES } from '../../data/constants';
 import type { Allergy } from '../../types';
@@ -7,24 +7,33 @@ import type { Allergy } from '../../types';
 interface Props {
   value: Allergy[];
   onChange: (next: Allergy[]) => void;
+  isOpen: boolean;
+  onToggle: () => void;
 }
 
-export function ExclusionsSection({ value, onChange }: Props) {
+export function ExclusionsSection({ value, onChange, isOpen, onToggle }: Props) {
   const selectedSet = new Set(value);
+  const summary = summarize(value);
 
   return (
-    <SectionShell
-      icon={<Ban size={16} />}
-      title="Allergen exclusions"
-      hint="Strict filters — users with these allergies will never see this ad. No weights apply."
+    <TargetingSection
+      icon={<ShieldAlert size={14} />}
+      eyebrow="Allergies to skip"
+      hint="Strict filter. Users with these allergies never see this ad. No priority applies."
+      summary={summary}
+      isOpen={isOpen}
+      onToggle={onToggle}
+      isEmpty={value.length === 0}
+      emptyCta="Add allergies"
     >
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+      <div className="uplate-targeting__chips">
         {ALLERGIES.map((a) => {
           const selected = selectedSet.has(a.value);
           return (
             <Chip
               key={a.value}
               selected={selected}
+              variant="negative"
               onClick={() => {
                 if (selected) {
                   onChange(value.filter((v) => v !== a.value));
@@ -39,19 +48,18 @@ export function ExclusionsSection({ value, onChange }: Props) {
         })}
       </div>
       {value.length > 0 && (
-        <p
-          style={{
-            fontSize: 12,
-            color: 'var(--text-soft)',
-            padding: '10px 14px',
-            background: 'var(--surface-2)',
-            borderRadius: 'var(--r-md)',
-          }}
-        >
-          {value.length} strict exclusion{value.length === 1 ? '' : 's'} active. These narrow reach but
-          protect users with allergies.
+        <p className="uplate-targeting__exclusion-note">
+          {value.length === 1 ? '1 strict exclusion' : `${value.length} strict exclusions`} active.
+          These narrow reach but protect users with allergies.
         </p>
       )}
-    </SectionShell>
+    </TargetingSection>
   );
+}
+
+function summarize(value: Allergy[]): string {
+  if (value.length === 0) return '';
+  const labels = value.slice(0, 4);
+  const more = value.length - labels.length;
+  return labels.join(', ') + (more > 0 ? `, and ${more} more` : '');
 }

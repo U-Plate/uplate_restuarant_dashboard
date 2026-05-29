@@ -41,7 +41,6 @@ export interface RestaurantProfile {
   notifications: {
     weekly: boolean;
     emailAlerts: boolean;
-    smsAlerts: boolean;
   };
   createdAt: string;
   updatedAt: string;
@@ -169,7 +168,6 @@ export interface AdInput {
   title: string;
   description?: string;
   redirectUrl?: string;
-  creativeUrl?: string;
   iconUrl?: string;
   status?: Status;
   location?: AdLocation;
@@ -180,7 +178,6 @@ export interface AdPatch {
   title?: string;
   description?: string;
   redirectUrl?: string;
-  creativeUrl?: string | null;
   iconUrl?: string | null;
   location?: AdLocation;
   status?: Status;
@@ -191,7 +188,6 @@ export interface UpdateAdRequest {
   title: string;
   description: string;
   redirectUrl: string;
-  creativeUrl?: string | null;
   iconUrl?: string | null;
   location: AdLocation;
   status: Status;
@@ -293,6 +289,16 @@ export interface AudienceInsightsResponse {
     cells: number[];
     perDayAdCount: number[];
     max: number;
+  };
+  /**
+   * Optional 7x24 heatmap of real impressions, indexed as `day*24 + hour`.
+   * Not yet returned by the production backend; available from the local
+   * adapter for dev. Front-end falls back to an empty-state when absent.
+   */
+  impressionsHeatmap?: {
+    cells: number[];
+    max: number;
+    totalImpressions: number;
   };
 }
 

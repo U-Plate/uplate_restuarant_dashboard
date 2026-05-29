@@ -108,7 +108,6 @@ export interface Ad {
   title: string;
   description: string;
   redirectUrl: string;
-  creativeUrl?: string;
   iconUrl?: string;
   status: Status;
   location: AdLocation;
@@ -118,9 +117,16 @@ export interface Ad {
   updatedAt: string;
 }
 
+export interface RestaurantNotifications {
+  weekly: boolean;
+  emailAlerts: boolean;
+}
+
 export interface RestaurantProfile {
   name?: string;
   iconUrl?: string;
+  contactEmail?: string;
+  notifications?: RestaurantNotifications;
 }
 
 export interface Campaign {

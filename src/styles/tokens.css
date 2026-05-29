@@ -1,53 +1,157 @@
+/*
+ * UPlate Restaurant Dashboard — design tokens
+ *
+ * Palette: cool-neutral light, OKLCH. Dusty blue accent derived from
+ * UPlate's brand pair (alice-blue #dcedff for tints, powder-blue #94b0da
+ * for mid). Confident enough to read as identity, not so saturated that
+ * it tips into generic SaaS-blue. Personality still lives in the type
+ * pairing (Fraunces verdict + Inter UI) and the rhythm, not in the chrome.
+ */
+
 :root {
-  /* Brand palette (only colors from spec) */
-  --bg: #DCEDFF;
-  --accent: #94B0DA;
-  --secondary: #8F91A2;
-  --text-soft: #505A5B;
-  --text: #343F3E;
+  /* --- Surfaces (cool-neutral light) ----------------------------------- */
+  --surface:           oklch(0.987 0.004 250);
+  --surface-sunken:    oklch(0.964 0.006 250);
+  --surface-raised:    oklch(0.995 0.002 250);
+  --surface-overlay:   oklch(0.22 0.008 250 / 0.42);
 
-  /* Derived alpha tints of brand colors */
-  --accent-08: rgba(148, 176, 218, 0.08);
-  --accent-12: rgba(148, 176, 218, 0.12);
-  --accent-20: rgba(148, 176, 218, 0.20);
-  --accent-35: rgba(148, 176, 218, 0.35);
-  --accent-60: rgba(148, 176, 218, 0.60);
+  /* --- Ink (text on cool light) -------------------------------------- */
+  --ink:               oklch(0.22 0.01 250);
+  --ink-2:             oklch(0.4 0.01 250);
+  --ink-3:             oklch(0.58 0.012 250);
+  --ink-disabled:      oklch(0.72 0.008 250);
+  --ink-inverse:       oklch(0.98 0.004 250);
 
-  --secondary-12: rgba(143, 145, 162, 0.12);
-  --secondary-20: rgba(143, 145, 162, 0.20);
-  --hairline: rgba(143, 145, 162, 0.18);
+  /* --- Hairlines ------------------------------------------------------ */
+  --hairline:          oklch(0.9 0.012 250);
+  --hairline-strong:   oklch(0.82 0.018 250);
 
-  --text-08: rgba(52, 63, 62, 0.08);
-  --text-soft-12: rgba(80, 90, 91, 0.12);
+  /* --- Accent (dusty UPlate blue) ------------------------------------ */
+  --accent:            oklch(0.5 0.10 250);
+  --accent-hover:      oklch(0.44 0.105 250);
+  --accent-pressed:    oklch(0.38 0.10 250);
+  --accent-tint:       oklch(0.94 0.034 250);
+  --accent-tint-2:     oklch(0.85 0.06 250);
+  --accent-on:         oklch(0.98 0.008 250);
 
-  /* Neutral surface (required for shadow lift over tinted bg) */
-  --surface: #FFFFFF;
-  --surface-2: #F4F8FE;
+  /* --- Semantic data colors ------------------------------------------ */
+  --data-clicks:       oklch(0.5 0.10 250);       /* primary metric, blue */
+  --data-clicks-tint:  oklch(0.94 0.034 250);
+  --data-impressions:  oklch(0.6 0.025 250);      /* recessive gray-blue */
+  --data-impressions-tint: oklch(0.93 0.012 250);
+  --data-ctr:          oklch(0.42 0.07 65);       /* warm sienna for CTR family */
+  --data-ctr-tint:     oklch(0.94 0.03 65);
 
-  /* Radii */
-  --r-sm: 8px;
-  --r-md: 12px;
-  --r-lg: 16px;
-  --r-xl: 24px;
-  --r-pill: 999px;
+  /* --- Trend direction ------------------------------------------------ */
+  --trend-positive:    oklch(0.5 0.10 250);
+  --trend-positive-tint: oklch(0.94 0.034 250);
+  --trend-negative:    oklch(0.52 0.13 35);
+  --trend-negative-tint: oklch(0.94 0.04 35);
+  --trend-flat:        oklch(0.58 0.012 250);
 
-  /* Soft shadows (no hard borders) */
-  --shadow-sm: 0 1px 2px rgba(52, 63, 62, 0.04), 0 1px 3px rgba(52, 63, 62, 0.04);
-  --shadow-md: 0 6px 16px rgba(52, 63, 62, 0.06), 0 2px 4px rgba(52, 63, 62, 0.04);
-  --shadow-lg: 0 16px 40px rgba(52, 63, 62, 0.08);
+  /* --- Status -------------------------------------------------------- */
+  --status-active:     oklch(0.5 0.10 250);
+  --status-active-on:  oklch(0.34 0.095 250);
+  --status-active-tint: oklch(0.93 0.045 250);
+  --status-paused:     oklch(0.6 0.01 250);
+  --status-paused-on:  oklch(0.4 0.012 250);
+  --status-paused-tint: oklch(0.92 0.006 250);
 
-  /* Spacing */
+  /* --- Focus --------------------------------------------------------- */
+  --focus-ring:        oklch(0.5 0.10 250);
+  --focus-ring-shadow: 0 0 0 2px oklch(0.987 0.004 250), 0 0 0 4px oklch(0.5 0.10 250);
+
+  /* --- Typography ---------------------------------------------------- */
+  --font-display:      'Fraunces', 'Iowan Old Style', Georgia, serif;
+  --font-ui:           'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --font-numeric:      'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+
+  --type-display:      clamp(2rem, 1.4rem + 2.4vw, 2.625rem);   /* verdict on Overview */
+  --type-display-lh:   1.1;
+  --type-headline:     1.375rem;   /* 22px page section */
+  --type-headline-lh:  1.25;
+  --type-h3:           1.0625rem;  /* 17px card title */
+  --type-h3-lh:        1.35;
+  --type-body:         0.875rem;   /* 14px */
+  --type-body-lh:      1.5;
+  --type-meta:         0.78125rem; /* 12.5px label */
+  --type-meta-lh:      1.4;
+  --type-eyebrow:      0.6875rem;  /* 11px caps */
+  --type-eyebrow-lh:   1.35;
+  --type-number-lg:    2rem;       /* 32px supporting numbers */
+  --type-number-lg-lh: 1.1;
+
+  /* --- Spacing scale -------------------------------------------------- */
+  --s-0: 2px;
   --s-1: 4px;
   --s-2: 8px;
   --s-3: 12px;
   --s-4: 16px;
-  --s-5: 24px;
-  --s-6: 32px;
-  --s-7: 48px;
-  --s-8: 64px;
+  --s-5: 20px;
+  --s-6: 24px;
+  --s-7: 32px;
+  --s-8: 40px;
+  --s-9: 56px;
+  --s-10: 80px;
 
-  --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  /* --- Radii --------------------------------------------------------- */
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-xl: 20px;
+  --r-pill: 999px;
 
-  --sidebar-w: 248px;
-  --topbar-h: 72px;
+  /* --- Shadows (used sparingly: popovers, drawers) ------------------- */
+  --shadow-soft: 0 1px 2px oklch(0.22 0.01 250 / 0.04);
+  --shadow-pop:  0 12px 32px oklch(0.22 0.01 250 / 0.08), 0 2px 6px oklch(0.22 0.01 250 / 0.06);
+  --shadow-drawer: 16px 0 48px oklch(0.22 0.01 250 / 0.12);
+
+  /* --- Motion -------------------------------------------------------- */
+  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+  --ease-out-expo:  cubic-bezier(0.16, 1, 0.3, 1);
+  --motion-fast:    140ms;
+  --motion-base:    200ms;
+  --motion-slow:    280ms;
+
+  /* --- Shell geometry ----------------------------------------------- */
+  --sidebar-w:      244px;
+  --topbar-h-mobile: 56px;
+  --bottombar-h:    64px;
+  --page-pad-x:     clamp(20px, 4vw, 48px);
+  --page-pad-y:     clamp(28px, 5vw, 56px);
+  --page-max:       1180px;
+  --measure:        68ch;
+}
+
+/* Legacy aliases — keep older components painting in the new palette
+ * without forcing a fan-out rewrite. Remove once usages are migrated.   */
+:root {
+  --bg:             var(--surface);
+  --accent-08:      oklch(0.5 0.10 250 / 0.08);
+  --accent-12:      oklch(0.5 0.10 250 / 0.12);
+  --accent-20:      var(--accent-tint);
+  --accent-35:      var(--accent-tint-2);
+  --accent-60:      oklch(0.5 0.10 250 / 0.6);
+  --secondary:      var(--ink-3);
+  --secondary-12:   var(--surface-sunken);
+  --secondary-20:   var(--hairline);
+  --text:           var(--ink);
+  --text-soft:      var(--ink-2);
+  --text-08:        oklch(0.22 0.01 250 / 0.08);
+  --text-soft-12:   oklch(0.4 0.01 250 / 0.12);
+  --surface-2:      var(--surface-sunken);
+  --shadow-sm:      var(--shadow-soft);
+  --shadow-md:      var(--shadow-soft);
+  --shadow-lg:      var(--shadow-pop);
+  --font:           var(--font-ui);
+  --topbar-h:       var(--topbar-h-mobile);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-fast: 0ms;
+    --motion-base: 0ms;
+    --motion-slow: 0ms;
+  }
 }
