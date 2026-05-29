@@ -2,17 +2,27 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/svg+xml" href="/assets/logo-BjDNvxQU.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..600;1,9..144,400..500&family=Inter:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
     <title>UPlate · Restaurant Dashboard</title>
-    <script type="module" crossorigin src="/assets/index-B-SC1qHt.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-B-XOHa9i.css">
+    <script>
+      // Set the moss surface before React mounts so unauth'd routes don't
+      // flash cream. Toggled by AuthGate after auth state resolves.
+      (function () {
+        var p = window.location.pathname;
+        if (p === '/sign-in' || p === '/sign-up') {
+          document.documentElement.setAttribute('data-auth', 'true');
+        }
+      })();
+    </script>
+    <script type="module" crossorigin src="/assets/index-D9SmeQbN.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-CPEeungm.css">
   </head>
   <body>
     <div id="root"></div>
