@@ -10,6 +10,7 @@ import type {
   DietaryPreference,
   Targeting,
 } from '../types';
+import { DEMO_SCHOOL_ID } from './constants';
 
 function seeded(seed: number) {
   let s = seed % 2147483647;
@@ -265,6 +266,7 @@ export function buildSeedState(): AppState {
   // Campaign 1: Post-Workout Protein Bowls
   const c1: Campaign = {
     id: 'c1',
+    schoolId: DEMO_SCHOOL_ID,
     name: 'Post-Workout Protein Bowls',
     status: 'active',
     startDate: daysAgo(28),
@@ -344,6 +346,7 @@ export function buildSeedState(): AppState {
   // Campaign 2: Vegan Lunch Boost
   const c2: Campaign = {
     id: 'c2',
+    schoolId: DEMO_SCHOOL_ID,
     name: 'Vegan Lunch Boost',
     status: 'active',
     startDate: daysAgo(20),
@@ -406,6 +409,7 @@ export function buildSeedState(): AppState {
   // Campaign 3: Late-Night Study Fuel
   const c3: Campaign = {
     id: 'c3',
+    schoolId: DEMO_SCHOOL_ID,
     name: 'Late-Night Study Fuel',
     status: 'paused',
     startDate: daysAgo(45),
@@ -460,6 +464,7 @@ export function buildSeedState(): AppState {
   // Campaign 4: Macro-Friendly Breakfast
   const c4: Campaign = {
     id: 'c4',
+    schoolId: DEMO_SCHOOL_ID,
     name: 'Macro-Friendly Breakfast',
     status: 'active',
     startDate: daysAgo(10),

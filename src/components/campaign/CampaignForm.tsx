@@ -4,7 +4,6 @@ import { Modal } from '../ui/Modal';
 import { Button } from '../ui/Button';
 import { ConfirmDialog } from '../ui/ConfirmDialog';
 import { TextField, SelectField } from '../ui/Field';
-import { CampaignCard } from './CampaignCard';
 
 interface CampaignFormProps {
   open: boolean;
@@ -77,20 +76,6 @@ export function CampaignForm({ open, onClose, onSubmit, initial, mode = 'create'
     }
     onSubmit({ name: trimmedName, startDate, endDate, status });
   };
-
-  const draftCampaign: Campaign = useMemo(
-    () => ({
-      id: initial?.id ?? 'preview-draft',
-      name: trimmedName || 'Untitled campaign',
-      status,
-      startDate,
-      endDate,
-      adIds: initial?.adIds ?? [],
-      createdAt: initial?.createdAt ?? new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    }),
-    [trimmedName, status, startDate, endDate, initial],
-  );
 
   return (
     <>

@@ -7,6 +7,11 @@ import type {
   DayOfWeek,
 } from '../types';
 
+// School this dashboard's account is scoped to. Schools are owned by the live
+// backend (slugs like 'purdue'); the frontend + mock only reference the id.
+// One school per account: campaigns inherit it, the restaurant never picks it.
+export const DEMO_SCHOOL_ID = 'purdue';
+
 export const AUDIENCE_TAGS: { value: AudienceTag; label: string; hint: string }[] = [
   { value: 'highProtein', label: 'High Protein', hint: 'Users tracking protein intake' },
   { value: 'highCarb', label: 'High Carb', hint: 'Carb-focused fueling' },

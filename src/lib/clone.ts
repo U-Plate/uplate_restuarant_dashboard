@@ -1,4 +1,5 @@
 import type { Ad, Campaign, Targeting } from '../types';
+import { DEMO_SCHOOL_ID } from '../data/constants';
 import { newId } from './format';
 
 export function emptyTargeting(): Targeting {
@@ -36,6 +37,7 @@ export function newCampaignSkeleton(): Campaign {
   end.setDate(end.getDate() + 30);
   return {
     id: newId('cmp'),
+    schoolId: DEMO_SCHOOL_ID,
     name: 'New Campaign',
     status: 'paused',
     startDate: start.toISOString().slice(0, 10),

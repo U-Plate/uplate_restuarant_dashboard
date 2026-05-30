@@ -48,7 +48,7 @@ import { ApiError } from './types';
 import type { AdEvent, AppState, Targeting } from '../types';
 import { buildSeedState, metricsFromEvents } from '../data/mockData';
 import { cloneAd, cloneCampaign, emptyTargeting, newAdSkeleton, newCampaignSkeleton } from '../lib/clone';
-import { AUDIENCE_LABEL, DIETARY_LABEL } from '../data/constants';
+import { AUDIENCE_LABEL, DIETARY_LABEL, DEMO_SCHOOL_ID } from '../data/constants';
 
 const STORAGE_KEY = 'uplate-dashboard-v2';
 
@@ -281,6 +281,10 @@ function titleCase(s: string): string {
 // flow without a backend, treat this exact code as valid; anything else fails.
 const LOCAL_DEMO_ACCESS_CODE = 'UPLATE-DEMO';
 
+// The school this demo account is bound to (one school per account). Real
+// access codes carry a school_id; created campaigns inherit it.
+const LOCAL_DEMO_SCHOOL_ID = DEMO_SCHOOL_ID;
+
 export function createLocalClient(): ApiClient {
   return {
     auth: {
@@ -368,6 +372,8 @@ export function createLocalClient(): ApiClient {
         const c: Campaign = {
           ...newCampaignSkeleton(),
           ...input,
+          // School is inherited from the account, never sent by the client.
+          schoolId: LOCAL_DEMO_SCHOOL_ID,
           status: input.status ?? 'paused',
         };
         const next: AppState = {

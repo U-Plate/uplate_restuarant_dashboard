@@ -266,8 +266,11 @@ SELECT restaurant_id, role FROM restaurant_users WHERE firebase_uid = ?1;
 ### 5.4 Access codes & registration
 
 A restaurant is onboarded out-of-band (admin tooling using `ADMIN_API_KEY`),
-which creates a `restaurants` row and one or more single-use rows in
-`access_codes`. The sign-up flow (`SignUp.tsx` → `AuthContext.signUp`) is:
+which creates a `restaurants` row (with its `school_id`) and one or more
+single-use rows in `access_codes` (each also carrying a `school_id`). The
+account is scoped to exactly one school: every campaign it creates inherits that
+school, and ad serving uses it to scope ads to a campus. The sign-up flow
+(`SignUp.tsx` → `AuthContext.signUp`) is:
 
 1. **Client** calls `POST /auth/validate-access-code` (debounced, as the user
    types) to preview which restaurant the code unlocks. Read-only; never
@@ -385,8 +388,11 @@ PRAGMA foreign_keys = ON;
 -- ─────────────────────────────────────────────────────────────
 -- Tenancy & auth
 -- ─────────────────────────────────────────────────────────────
+-- The `schools` table is owned by the live UPlate backend (campuses, e.g.
+-- 'purdue'); this service only references `school_id`. One school per account.
 CREATE TABLE restaurants (
   id              TEXT PRIMARY KEY,
+  school_id       TEXT NOT NULL,  -- campus this account serves
   name            TEXT,
   icon_url        TEXT,
   contact_email   TEXT,
@@ -407,6 +413,7 @@ CREATE INDEX idx_restaurant_users_rid ON restaurant_users(restaurant_id);
 CREATE TABLE access_codes (
   code            TEXT PRIMARY KEY,         -- e.g. 'UPLATE-7Q2F'
   restaurant_id   TEXT NOT NULL REFERENCES restaurants(id) ON DELETE CASCADE,
+  school_id       TEXT NOT NULL,  -- campus this code binds the account to
   consumed_at     TEXT,                     -- NULL = still valid
   consumed_by_uid TEXT,
   created_at      TEXT NOT NULL,
@@ -420,6 +427,7 @@ CREATE INDEX idx_access_codes_rid ON access_codes(restaurant_id);
 CREATE TABLE campaigns (
   id              TEXT PRIMARY KEY,
   restaurant_id   TEXT NOT NULL REFERENCES restaurants(id) ON DELETE CASCADE,
+  school_id       TEXT NOT NULL,  -- stamped from the account; ads serve only to this campus
   name            TEXT NOT NULL,
   status          TEXT NOT NULL DEFAULT 'paused',  -- 'active' | 'paused'
   start_date      TEXT NOT NULL,            -- 'YYYY-MM-DD'
@@ -431,6 +439,7 @@ CREATE TABLE campaigns (
 );
 CREATE INDEX idx_campaigns_rid_order  ON campaigns(restaurant_id, sort_order);
 CREATE INDEX idx_campaigns_rid_status ON campaigns(restaurant_id, status);
+CREATE INDEX idx_campaigns_school     ON campaigns(school_id);  -- ad serving filters by campus
 
 -- ─────────────────────────────────────────────────────────────
 -- Ads
@@ -746,6 +755,9 @@ Request (`RestaurantPatch`; omitted = unchanged, `null` = clear):
 - **`CampaignInput`**: `{ name, status?, startDate, endDate }`. Default
   `status='paused'`. New campaigns go to the **front** of the order
   (`sort_order` lower than all existing) — the reference adapter prepends.
+  `school_id` is **not** part of the input: stamp it server-side from the
+  authenticated account's `restaurants.school_id` so every campaign inherits the
+  account's campus. The returned `Campaign` includes `schoolId`.
 - **`CampaignDetailResponse`**:
   ```ts
   { campaign: Campaign; ads: Ad[]; stats: CampaignStats;

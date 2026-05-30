@@ -134,6 +134,9 @@ export interface RestaurantProfile {
 
 export interface Campaign {
   id: string;
+  /** Campus this campaign's ads serve to. Inherited from the account (set via the
+   *  access code at registration); the dashboard never sets or edits it. */
+  schoolId: string;
   name: string;
   status: Status;
   startDate: string;
