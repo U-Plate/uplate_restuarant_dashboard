@@ -8,22 +8,25 @@ export type AudienceTag =
   | 'macroFriendly';
 
 export type DietaryPreference =
-  | 'vegetarian'
   | 'vegan'
-  | 'glutenFree'
-  | 'dairyFree'
-  | 'kosher'
+  | 'vegetarian'
+  | 'pescatarian'
   | 'halal'
-  | 'pescatarian';
+  | 'kosher';
 
 export type Allergy =
-  | 'peanuts'
-  | 'treeNuts'
-  | 'shellfish'
-  | 'eggs'
-  | 'soy'
+  | 'gluten'
   | 'dairy'
-  | 'wheat';
+  | 'nuts'
+  | 'shellfish'
+  | 'soy'
+  | 'eggs'
+  | 'peanuts'
+  | 'wheat'
+  | 'fish'
+  | 'treeNuts'
+  | 'coconut'
+  | 'sesame';
 
 export type DayOfWeek = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
 

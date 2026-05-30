@@ -42,8 +42,9 @@ interface SidebarBodyProps {
 
 export function SidebarBody({ onNavigate }: SidebarBodyProps) {
   const { restaurant, user, signOut } = useAuth();
-  const { pathname } = useLocation();
-  const fromState = (useLocation().state as { from?: string } | null)?.from;
+  const location = useLocation();
+  const { pathname } = location;
+  const fromState = (location.state as { from?: string } | null)?.from;
   const onAdDetail = /^\/campaigns\/[^/]+\/ads\/[^/]+/.test(pathname);
   const adDetailFromLibrary = onAdDetail && !!fromState?.startsWith('/ads');
 
@@ -63,27 +64,19 @@ export function SidebarBody({ onNavigate }: SidebarBodyProps) {
         display: 'flex',
         flexDirection: 'column',
         height: '100%',
-        padding: 'var(--s-6) var(--s-4) var(--s-4)',
-        gap: 'var(--s-7)',
+        padding: 'var(--s-5) var(--s-4) var(--s-4)',
+        gap: 'var(--s-4)',
       }}
     >
-      <header style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s-2)', padding: '0 var(--s-2)' }}>
-        <span
-          style={{
-            fontFamily: 'var(--font-ui)',
-            fontSize: 'var(--type-eyebrow)',
-            letterSpacing: '0.14em',
-            textTransform: 'uppercase',
-            color: 'var(--ink-3)',
-            fontWeight: 600,
-          }}
-        >
-          UPlate · Restaurant Ads
-        </span>
+      <header className="uplate-sidebar__brand">
+        <div className="uplate-sidebar__masthead">
+          <span className="uplate-sidebar__wordmark">UPlate</span>
+          <span className="uplate-sidebar__brandqual">Restaurant Ads</span>
+        </div>
         <RestaurantIdentity name={restaurant?.name} iconUrl={restaurant?.iconUrl} />
       </header>
 
-      <nav aria-label="Primary" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s-0)' }}>
+      <nav aria-label="Primary" className="uplate-sidebar__nav">
         {NAV.map((item) => {
           const active = isActive(item);
           return (
@@ -92,16 +85,9 @@ export function SidebarBody({ onNavigate }: SidebarBodyProps) {
               to={item.to}
               onClick={onNavigate}
               aria-current={active ? 'page' : undefined}
-              style={navItemStyle(active)}
-              onMouseEnter={(e) => {
-                if (!active) e.currentTarget.style.background = 'var(--surface-sunken)';
-              }}
-              onMouseLeave={(e) => {
-                if (!active) e.currentTarget.style.background = 'transparent';
-              }}
+              className={`uplate-sidebar__item${active ? ' uplate-sidebar__item--active' : ''}`}
             >
-              <span aria-hidden style={activeMarkerStyle(active)} />
-              <span style={{ display: 'inline-flex', color: active ? 'var(--accent)' : 'var(--ink-2)' }}>
+              <span aria-hidden className="uplate-sidebar__item-icon">
                 {item.icon}
               </span>
               <span style={{ flex: 1 }}>{item.label}</span>
@@ -117,7 +103,7 @@ export function SidebarBody({ onNavigate }: SidebarBodyProps) {
             display: 'flex',
             alignItems: 'center',
             gap: 'var(--s-3)',
-            padding: 'var(--s-2)',
+            padding: '0 var(--s-3)',
             borderRadius: 'var(--r-md)',
           }}
         >
@@ -159,29 +145,9 @@ export function SidebarBody({ onNavigate }: SidebarBodyProps) {
             type="button"
             aria-label="Sign out"
             onClick={() => void signOut()}
-            style={{
-              border: 'none',
-              background: 'transparent',
-              color: 'var(--ink-2)',
-              width: 32,
-              height: 32,
-              borderRadius: 'var(--r-sm)',
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              cursor: 'pointer',
-              transition: 'background var(--motion-fast) var(--ease-out-quart), color var(--motion-fast) var(--ease-out-quart)',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = 'var(--surface-sunken)';
-              e.currentTarget.style.color = 'var(--ink)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = 'transparent';
-              e.currentTarget.style.color = 'var(--ink-2)';
-            }}
+            className="uplate-sidebar__signout"
           >
-            <LogOut size={15} strokeWidth={1.75} />
+            <LogOut size={16} strokeWidth={1.75} />
           </button>
         </div>
       </div>
@@ -210,7 +176,7 @@ export function Sidebar() {
 function RestaurantIdentity({ name, iconUrl }: { name?: string; iconUrl?: string }) {
   const display = name?.trim() || 'Your restaurant';
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--s-3)', minWidth: 0 }}>
       {iconUrl ? (
         <img
           src={iconUrl}
@@ -264,36 +230,4 @@ function RestaurantIdentity({ name, iconUrl }: { name?: string; iconUrl?: string
       </span>
     </div>
   );
-}
-
-function navItemStyle(active: boolean): React.CSSProperties {
-  return {
-    position: 'relative',
-    display: 'flex',
-    alignItems: 'center',
-    gap: 12,
-    padding: '9px 12px',
-    paddingLeft: 14,
-    borderRadius: 'var(--r-md)',
-    fontSize: 'var(--type-body)',
-    fontWeight: active ? 600 : 500,
-    textDecoration: 'none',
-    color: active ? 'var(--ink)' : 'var(--ink-2)',
-    background: active ? 'var(--accent-tint)' : 'transparent',
-    transition: 'background var(--motion-fast) var(--ease-out-quart), color var(--motion-fast) var(--ease-out-quart)',
-  };
-}
-
-function activeMarkerStyle(active: boolean): React.CSSProperties {
-  return {
-    position: 'absolute',
-    left: 2,
-    top: '50%',
-    transform: 'translateY(-50%)',
-    width: 2,
-    height: active ? 20 : 0,
-    borderRadius: 'var(--r-pill)',
-    background: 'var(--accent)',
-    transition: 'height var(--motion-base) var(--ease-out-quart)',
-  };
 }

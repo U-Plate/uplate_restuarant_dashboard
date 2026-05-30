@@ -15,6 +15,7 @@ import type {
   AnalyticsPoint,
   AnalyticsSeriesQuery,
   AnalyticsSeriesResponse,
+  AudienceEngagement,
   AudienceInsightsResponse,
   AuthSessionResponse,
   BootstrapResponse,
@@ -34,8 +35,7 @@ import type {
   DuplicateCampaignResponse,
   RegisterRequest,
   RegisterResponse,
-  ReorderCampaignsRequest,
-  ReorderCampaignsResponse,
+
   RestaurantPatch,
   RestaurantProfile,
   SetStatusRequest,
@@ -175,6 +175,81 @@ function aggregateSeries(state: AppState, campaignId?: string): AnalyticsPoint[]
   const ads = adsOf(state, campaignId);
   const adIds = new Set(ads.map((a) => a.id));
   return aggregateSeriesFromEvents(eventsForAds(state, adIds));
+}
+
+// Cross-ad click engagement. Mirrors the per-ad click-signals math but folds
+// every ad's click events into one ranked aggregate, so the Audience Insights
+// screen needs a single request instead of one click-signals call per ad.
+function aggregateAdEngagement(state: AppState): AudienceEngagement {
+  const clickEvents = state.events.filter((e) => e.type === 'click');
+  const totalClicks = clickEvents.length;
+
+  // targeted = at least one of the restaurant's ads targets that signal.
+  const targetedTags = new Set<string>();
+  const targetedDiet = new Set<string>();
+  const targetedFood = new Map<string, string>(); // lowercased -> original case
+  for (const ad of Object.values(state.ads)) {
+    for (const r of ad.targeting.audienceTags) targetedTags.add(r.tag);
+    for (const r of ad.targeting.dietary) targetedDiet.add(r.pref);
+    for (const r of ad.targeting.foodInterests) targetedFood.set(r.name.toLowerCase(), r.name);
+  }
+
+  const tagCounts = new Map<string, number>();
+  const dietCounts = new Map<string, number>();
+  const foodCounts = new Map<string, number>();
+  const contributingAds = new Set<string>();
+  let recurringClicks = 0;
+  for (const ev of clickEvents) {
+    contributingAds.add(ev.adId);
+    for (const tag of ev.tags) tagCounts.set(tag, (tagCounts.get(tag) ?? 0) + 1);
+    for (const pref of ev.dietary) dietCounts.set(pref, (dietCounts.get(pref) ?? 0) + 1);
+    for (const name of ev.foodInterests) {
+      const k = name.toLowerCase();
+      foodCounts.set(k, (foodCounts.get(k) ?? 0) + 1);
+    }
+    if (ev.recurringCustomer) recurringClicks += 1;
+  }
+
+  const safeDivide = (n: number) => (totalClicks === 0 ? 0 : n / totalClicks);
+
+  const topAudienceTags = [...tagCounts.entries()]
+    .map(([tag, count]) => ({
+      key: tag,
+      label: AUDIENCE_LABEL[tag as keyof typeof AUDIENCE_LABEL] ?? tag,
+      pct: safeDivide(count),
+      targeted: targetedTags.has(tag),
+    }))
+    .sort((a, b) => b.pct - a.pct)
+    .slice(0, 5);
+
+  const topDietary = [...dietCounts.entries()]
+    .map(([pref, count]) => ({
+      key: pref,
+      label: DIETARY_LABEL[pref as keyof typeof DIETARY_LABEL] ?? pref,
+      pct: safeDivide(count),
+      targeted: targetedDiet.has(pref),
+    }))
+    .sort((a, b) => b.pct - a.pct)
+    .slice(0, 5);
+
+  const topFoodInterests = [...foodCounts.entries()]
+    .map(([key, count]) => ({
+      key,
+      label: targetedFood.get(key) ?? titleCase(key),
+      pct: safeDivide(count),
+      targeted: targetedFood.has(key),
+    }))
+    .sort((a, b) => b.pct - a.pct)
+    .slice(0, 5);
+
+  return {
+    totalClicks,
+    topAudienceTags,
+    topDietary,
+    topFoodInterests,
+    recurringPct: safeDivide(recurringClicks),
+    contributingAdCount: contributingAds.size,
+  };
 }
 
 function toRestaurantProfile(state: AppState): RestaurantProfile {
@@ -381,18 +456,7 @@ export function createLocalClient(): ApiClient {
         return { campaign: updated };
       },
 
-      reorder: async (input: ReorderCampaignsRequest): Promise<ReorderCampaignsResponse> => {
-        const state = load();
-        const current = new Set(state.campaignOrder);
-        const next = new Set(input.orderedIds);
-        if (current.size !== next.size || [...current].some((id) => !next.has(id))) {
-          throw new ApiError(422, {
-            error: { code: 'reorder_set_mismatch', message: 'orderedIds must match the existing campaign set', requestId: 'local' },
-          });
-        }
-        save({ ...state, campaignOrder: [...input.orderedIds] });
-        return { campaignOrder: [...input.orderedIds] };
-      },
+      
     },
 
     ads: {
@@ -727,6 +791,7 @@ export function createLocalClient(): ApiClient {
         return {
           tagUsage,
           dietaryUsage,
+          engagement: aggregateAdEngagement(state),
           heatmap: { cells, perDayAdCount, max },
           impressionsHeatmap:
             totalImpressions > 0

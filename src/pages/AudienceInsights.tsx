@@ -6,15 +6,11 @@ import { Verdict } from '../components/overview/Verdict';
 import { CoverageList } from '../components/audience/CoverageList';
 import { EngagementPanel } from '../components/audience/EngagementPanel';
 import { HeatmapPair } from '../components/audience/HeatmapPair';
-import {
-  coverageInsight,
-  type AggregateEngagement,
-} from '../lib/audience-insight';
+import { coverageInsight } from '../lib/audience-insight';
 
 export default function AudienceInsights() {
   const { state } = useApp();
   const [insights, setInsights] = useState<AudienceInsightsResponse | null>(null);
-  const [engagement, setEngagement] = useState<AggregateEngagement | null>(null);
   const [insightsError, setInsightsError] = useState(false);
 
   const adIds = useMemo(() => Object.keys(state.ads), [state.ads]);
@@ -37,9 +33,9 @@ export default function AudienceInsights() {
   }, [state]);
 
   const insight = useMemo(() => {
-    if (!insights || !engagement) return null;
-    return coverageInsight(state, insights, engagement);
-  }, [state, insights, engagement]);
+    if (!insights) return null;
+    return coverageInsight(state, insights, insights.engagement);
+  }, [state, insights]);
 
   const hasAds = adIds.length > 0;
 
@@ -84,7 +80,7 @@ export default function AudienceInsights() {
 
       <div className="uplate-audience-panels">
         <CoverageList state={state} />
-        <EngagementPanel adIds={adIds} onLoaded={setEngagement} />
+        <EngagementPanel engagement={insights?.engagement ?? null} error={insightsError} />
       </div>
 
       {insights ? (

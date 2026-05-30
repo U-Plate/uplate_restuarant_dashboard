@@ -190,6 +190,131 @@ input, textarea, select, button {
   }
 }
 
+/* ---------- Sidebar (desktop rail + mobile drawer body) --------------- */
+
+/* Brand zone: a small editorial masthead. The UPlate wordmark is the one
+ * place the Fraunces display voice enters the chrome (it carries the auth
+ * surface's identity inward); everything below it stays Inter and quiet. */
+.uplate-sidebar__brand {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+  padding: 0 var(--s-3) var(--s-5);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.uplate-sidebar__masthead {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.uplate-sidebar__wordmark {
+  font-family: var(--font-display);
+  font-optical-sizing: auto;
+  font-variation-settings: 'opsz' 72;
+  font-weight: 500;
+  font-size: 1.375rem;
+  line-height: 1.04;
+  letter-spacing: -0.018em;
+  color: var(--ink);
+}
+
+.uplate-sidebar__brandqual {
+  font-family: var(--font-ui);
+  font-size: var(--type-eyebrow);
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+
+.uplate-sidebar__nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.uplate-sidebar__item {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  min-height: 44px;
+  padding: 0 var(--s-3);
+  border-radius: var(--r-md);
+  border: 1px solid transparent;
+  font-size: var(--type-body);
+  font-weight: 500;
+  text-decoration: none;
+  color: var(--ink-2);
+  transition: background var(--motion-fast) var(--ease-out-quart),
+              border-color var(--motion-fast) var(--ease-out-quart),
+              color var(--motion-fast) var(--ease-out-quart);
+}
+
+/* Hover lifts toward the page surface so it reads against the sunken rail. */
+.uplate-sidebar__item:hover {
+  background: var(--surface);
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.uplate-sidebar__item:active {
+  background: var(--accent-tint);
+}
+
+.uplate-sidebar__item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.uplate-sidebar__item-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--ink-2);
+  transition: color var(--motion-fast) var(--ease-out-quart);
+}
+.uplate-sidebar__item:hover .uplate-sidebar__item-icon {
+  color: var(--ink);
+}
+
+.uplate-sidebar__item--active,
+.uplate-sidebar__item--active:hover {
+  background: var(--accent-tint);
+  border-color: oklch(0.5 0.10 250 / 0.18);
+  color: var(--ink);
+  font-weight: 600;
+}
+.uplate-sidebar__item--active .uplate-sidebar__item-icon,
+.uplate-sidebar__item--active:hover .uplate-sidebar__item-icon {
+  color: var(--accent);
+}
+
+.uplate-sidebar__signout {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: var(--ink-2);
+  border-radius: var(--r-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background var(--motion-fast) var(--ease-out-quart),
+              color var(--motion-fast) var(--ease-out-quart);
+}
+.uplate-sidebar__signout:hover {
+  background: var(--surface);
+  color: var(--ink);
+}
+.uplate-sidebar__signout:active {
+  background: var(--accent-tint);
+}
+
 /* ---------- Campaigns table (Analytics page) -------------------------- */
 
 .uplate-camps-table {

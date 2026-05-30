@@ -36,13 +36,11 @@ const ALL_AUDIENCE_TAGS: AudienceTag[] = [
 ];
 
 const ALL_DIETARY: DietaryPreference[] = [
-  'vegetarian',
   'vegan',
-  'glutenFree',
-  'dairyFree',
-  'kosher',
-  'halal',
+  'vegetarian',
   'pescatarian',
+  'halal',
+  'kosher',
 ];
 
 const OFF_TARGET_FOODS: string[] = [
@@ -372,7 +370,7 @@ export function buildSeedState(): AppState {
         ],
         dietary: [
           { pref: 'vegan', priority: 'required' },
-          { pref: 'glutenFree', priority: 'medium' },
+          { pref: 'vegetarian', priority: 'medium' },
         ],
         foodInterests: [
           { name: 'Tofu Stir-Fry', priority: 'high' },

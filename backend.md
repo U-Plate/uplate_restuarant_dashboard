@@ -1,1429 +1,1268 @@
-# UPlate Restaurant Dashboard — Backend Contract
+# UPlate Restaurant Dashboard — Cloudflare Backend Specification
 
-This document specifies the backend a single restaurant dashboard talks to. It
-is the wire contract: tables, columns, foreign keys, indexes, every endpoint,
-every request/response shape, and which page consumes it.
+This document is the complete blueprint for building the backend that the UPlate
+restaurant dashboard talks to, deployed entirely on **Cloudflare**. It is written
+to be read by a human engineer and executed by an AI coding agent: every table,
+column, index, endpoint, request/response shape, aggregation query, and
+deployment step is spelled out.
 
-The schema mirrors the in-app `AppState` model (`src/types/index.ts`). The
-endpoint surface is deliberately denormalized at the page boundary so each
-screen renders from **one** round-trip — multiple queries fan out on the server,
-not the client.
+The contract is not invented here — it is dictated by the frontend that already
+exists. The browser app talks to the backend exclusively through the typed
+`ApiClient` in `src/api/client.ts`, with wire DTOs in `src/api/types.ts` and the
+HTTP wiring in `src/api/http.ts`. **The job of this backend is to make the HTTP
+adapter (`createHttpClient`) work against a real server, byte-for-byte with the
+shapes those files declare.** A reference in-memory implementation of every
+endpoint already exists in `src/api/local.ts` — when this doc and that file
+disagree about an aggregation, `local.ts` is the source of truth for behavior.
 
 ---
 
 ## Table of contents
 
-1. [Design principles](#design-principles)
-2. [Authentication & multi-tenancy](#authentication--multi-tenancy)
-3. [Conventions](#conventions)
-4. [SQL schema](#sql-schema)
-5. [Shared DTO types](#shared-dto-types)
-6. [Endpoints](#endpoints)
-7. [Page → endpoint map](#page--endpoint-map)
-8. [Error contract](#error-contract)
-9. [Migration notes](#migration-notes)
+1. [System overview](#1-system-overview)
+2. [Technology stack & Cloudflare resources](#2-technology-stack--cloudflare-resources)
+3. [Project layout](#3-project-layout)
+4. [Configuration: wrangler, bindings, secrets](#4-configuration-wrangler-bindings-secrets)
+5. [Authentication & multi-tenancy](#5-authentication--multi-tenancy)
+6. [Global conventions](#6-global-conventions)
+7. [D1 database schema](#7-d1-database-schema)
+8. [Request lifecycle & middleware](#8-request-lifecycle--middleware)
+9. [Shared DTO types](#9-shared-dto-types)
+10. [Dashboard endpoint reference](#10-dashboard-endpoint-reference)
+11. [Analytics computation (SQL)](#11-analytics-computation-sql)
+12. [Consumer-facing endpoints: event ingestion & ad serving](#12-consumer-facing-endpoints-event-ingestion--ad-serving)
+13. [Page → endpoint map](#13-page--endpoint-map)
+14. [Error contract](#14-error-contract)
+15. [Security, rate limiting & abuse](#15-security-rate-limiting--abuse)
+16. [Deployment & local development](#16-deployment--local-development)
+17. [Testing strategy](#17-testing-strategy)
+18. [Implementation checklist](#18-implementation-checklist)
 
 ---
 
-## Design principles
+## 1. System overview
 
-1. **One screen → one fetch.** Every page-level component reads from exactly
-   one GET endpoint. The server pre-joins, pre-aggregates, and returns a
-   tailored DTO instead of forcing the client to fan out N requests.
-2. **Bootstrap once.** The dashboard ships an `/api/bootstrap` endpoint that
-   returns the entire writable working set (campaigns, ads with targeting,
-   restaurant profile) on first load. Subsequent navigation reuses cached
-   client state; analytics pages refetch only their derived rollups.
-3. **Mutations return the full updated entity.** No follow-up GETs after a
-   POST/PATCH/DELETE — the response is sufficient to update local state.
-4. **Composite mutations are atomic.** Operations like "duplicate campaign
-   with its ads" are a single endpoint that runs in one DB transaction; the
-   client never orchestrates multi-step writes.
-5. **Server-computed aggregates.** Impressions, clicks, CTR, daily series,
-   heatmaps, tag usage, dietary mix, etc., are all computed in SQL — the
-   client never sums series client-side.
-6. **Cursor-friendly but page-stable.** Lists return enough metadata to
-   render without follow-ups (campaign count, ad count, latest updatedAt).
+There are two distinct client populations that hit this backend:
 
-## Authentication & multi-tenancy
+| Client | Who | Auth | What it does |
+| --- | --- | --- | --- |
+| **Restaurant dashboard** (this repo) | A restaurant's staff | Firebase ID token, restaurant-scoped | Creates/edits campaigns & ads, reads analytics |
+| **UPlate consumer app** (separate codebase, students) | End users | App/service token | Renders ads, emits impression & click events |
+
+The dashboard **reads** analytics. The consumer app **writes** the raw events
+(`ad_events`) that those analytics are derived from, and **reads** which ads to
+serve based on each ad's targeting rules. Both populations share one D1
+database. This document specifies the dashboard surface in full (§10–11) and the
+consumer surface that produces the underlying data (§12).
+
+### Core design principles
+
+1. **One screen → one fetch.** Every dashboard page reads from exactly one GET
+   endpoint. The Worker pre-joins and pre-aggregates so the browser never fans
+   out N requests or sums series client-side.
+2. **Bootstrap once.** `GET /bootstrap` returns the entire writable working set
+   (restaurant profile, campaigns, ads with targeting + metrics) on first load.
+3. **Mutations return the full updated entity.** No follow-up GET after a
+   POST/PATCH/PUT/DELETE — the response is enough to update local state.
+4. **Composite mutations are atomic.** "Duplicate campaign with its ads,"
+   "delete campaign and cascade its ads/events," etc. run in a single D1 batch
+   (one implicit transaction). The client never orchestrates multi-step writes.
+5. **All aggregates are computed server-side in SQL.** Impressions, clicks, CTR,
+   daily series, heatmaps, tag usage, dietary mix, click signals — every number
+   falls out of `GROUP BY` over the event and targeting tables.
+6. **Strict tenant isolation.** Every row carries a `restaurant_id`; every query
+   filters on the caller's resolved `restaurant_id`. A user can never read or
+   mutate another restaurant's data.
+
+---
+
+## 2. Technology stack & Cloudflare resources
+
+| Concern | Choice | Notes |
+| --- | --- | --- |
+| Compute | **Cloudflare Workers** | Single Worker, module syntax (`export default { fetch }`). |
+| Router | **Hono** (`hono`) | Lightweight, first-class Workers support, typed. |
+| Database | **Cloudflare D1** (SQLite) | Relational store. Accessed via the `DB` binding. |
+| Key/value cache | **Cloudflare KV** | Caches Google's Firebase public keys and (optionally) rate-limit counters. |
+| Object storage (optional) | **Cloudflare R2** | Restaurant/ad icon uploads, if/when added. Not required for v1. |
+| Auth verification | **Firebase Auth** ID tokens | Verified inside the Worker (no Firebase Admin SDK; verify the JWT directly). |
+| Scheduled jobs (optional) | **Cron Triggers** | E.g. nightly rollup tables if event volume grows. Not required for v1. |
+| Language | **TypeScript** | Shares the domain types with the frontend where practical. |
+| Tooling | **Wrangler** (`wrangler`) | Dev server, migrations, deploy, secrets. |
+
+D1 is SQLite, so honor SQLite semantics throughout:
+
+- Booleans are stored as `INTEGER` (`0`/`1`).
+- Timestamps are stored as `TEXT` in ISO-8601 UTC (`2026-05-29T14:03:00.000Z`)
+  so string comparison and `substr(...,1,10)` date-slicing behave exactly like
+  the reference adapter's `occurredAt.slice(0,10)`.
+- There is no native `BOOLEAN`, `JSON`, or `UUID` type; use `INTEGER`, `TEXT`.
+- Multi-statement atomicity is achieved with `env.DB.batch([...])`, which runs
+  the array of prepared statements in a single implicit transaction. D1 does
+  **not** support interactive `BEGIN/COMMIT` across awaits — design every
+  composite write as one `batch()`.
+
+---
+
+## 3. Project layout
+
+A suggested Worker repository structure (separate from this dashboard repo, or a
+`/server` subfolder):
+
+```
+server/
+├─ wrangler.toml
+├─ package.json
+├─ tsconfig.json
+├─ migrations/
+│  ├─ 0001_init.sql            # schema from §7
+│  └─ 0002_seed_dev.sql        # optional dev seed mirroring src/data/mockData.ts
+├─ src/
+│  ├─ index.ts                 # Worker entry: builds Hono app, exports { fetch }
+│  ├─ env.ts                   # Env binding types
+│  ├─ middleware/
+│  │  ├─ cors.ts
+│  │  ├─ auth.ts               # Firebase token verify + restaurant resolution
+│  │  ├─ error.ts              # ApiError → JSON error body
+│  │  └─ etag.ts               # If-Match / version concurrency
+│  ├─ auth/
+│  │  ├─ firebase.ts           # JWT verification against Google certs (+ KV cache)
+│  │  └─ accessCodes.ts        # validate/consume access codes
+│  ├─ routes/
+│  │  ├─ auth.ts
+│  │  ├─ bootstrap.ts
+│  │  ├─ restaurant.ts
+│  │  ├─ campaigns.ts
+│  │  ├─ ads.ts
+│  │  ├─ analytics.ts
+│  │  ├─ events.ts             # consumer ingestion (§12)
+│  │  └─ serving.ts            # consumer ad serving (§12)
+│  ├─ db/
+│  │  ├─ campaigns.ts          # query builders / repositories
+│  │  ├─ ads.ts                # incl. targeting read/write helpers
+│  │  ├─ events.ts
+│  │  └─ analytics.ts          # the SQL in §11
+│  ├─ dto.ts                   # wire types (mirror src/api/types.ts)
+│  └─ lib/
+│     ├─ ids.ts                # id generation
+│     ├─ ctr.ts                # ctr(impressions, clicks)
+│     └─ time.ts               # dow/hour bucketing in app timezone
+└─ test/
+   └─ *.test.ts
+```
+
+---
+
+## 4. Configuration: wrangler, bindings, secrets
+
+### `wrangler.toml`
+
+```toml
+name = "uplate-dashboard-api"
+main = "src/index.ts"
+compatibility_date = "2026-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# D1 database binding -> env.DB
+[[d1_databases]]
+binding = "DB"
+database_name = "uplate-dashboard"
+database_id = "<filled in by `wrangler d1 create`>"
+migrations_dir = "migrations"
+
+# KV namespace for cached Firebase public keys / rate limits -> env.CACHE
+[[kv_namespaces]]
+binding = "CACHE"
+id = "<filled in by `wrangler kv namespace create CACHE`>"
+
+# Non-secret vars
+[vars]
+FIREBASE_PROJECT_ID = "boilerfuel-hello-world"
+APP_TIMEZONE       = "America/Indiana/Indianapolis"
+ALLOWED_ORIGINS    = "https://restaurant.u-plate.com,http://localhost:5173"
+```
+
+> `FIREBASE_PROJECT_ID` must match the `projectId` in the frontend's
+> `src/firebase/config.ts` (`boilerfuel-hello-world`). It is the `aud` claim
+> every valid ID token must carry.
+
+### Secrets (set with `wrangler secret put`)
+
+| Secret | Purpose |
+| --- | --- |
+| `EVENT_INGEST_KEY` | Shared bearer key the consumer app/ingestion service uses to write `ad_events` (§12). |
+| `ADMIN_API_KEY` | Privileged key for back-office tooling that mints access codes & restaurants. |
+
+Firebase ID-token verification needs **no secret** — it uses Google's public
+signing certificates, fetched and cached at runtime (§5).
+
+### `env.ts`
+
+```ts
+export interface Env {
+  DB: D1Database;
+  CACHE: KVNamespace;
+  FIREBASE_PROJECT_ID: string;
+  APP_TIMEZONE: string;
+  ALLOWED_ORIGINS: string;
+  EVENT_INGEST_KEY: string;
+  ADMIN_API_KEY: string;
+}
+```
+
+---
+
+## 5. Authentication & multi-tenancy
+
+### 5.1 Primary credentials live in Firebase
 
 The dashboard authenticates users with **Firebase Authentication** (email +
-password). The client signs in via the Firebase Web SDK, then attaches the
-short-lived Firebase ID token to every backend request as
-`Authorization: Bearer <idToken>`.
+password) entirely on the client (`src/auth/AuthContext.tsx`,
+`src/firebase/config.ts`). The backend never sees passwords. Every authenticated
+request carries the user's Firebase **ID token** as:
 
-### Trust boundary
+```
+Authorization: Bearer <firebase_id_token>
+```
 
-The backend **must** verify the Firebase ID token on every request using the
-Firebase Admin SDK (or by validating the JWT against Firebase's published
-JWKS at `https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com`).
-Tokens are short-lived (~1 hour) and re-issued by the SDK; the server **never**
-issues its own JWTs.
+(See `src/api/http.ts` and `src/api/index.ts` — the token is attached via
+`getAuthToken()` → `firebaseAuth.currentUser.getIdToken()`.)
 
-From the verified token the server extracts the user's Firebase **UID** and
-**email**. It then looks up `restaurant_users` to resolve the
-`restaurant_id` bound to that UID — `restaurant_id` is **never** accepted as
-a request parameter. All schema tables that hold restaurant-owned data carry
-`restaurant_id` as a NOT NULL FK and are filtered on every query.
+### 5.2 Verifying the ID token inside the Worker
 
-### Account lifecycle
+Do **not** pull in the Firebase Admin SDK (heavy, Node-oriented). Verify the JWT
+directly with Web Crypto, which Workers support natively:
 
-1. **Onboarding.** UPlate operators generate an **access code** for a new
-   restaurant (see [`access_codes`](#access_codes)). The code is shared with
-   the restaurant out-of-band (email, phone).
-2. **Sign up.** A new operator visits the dashboard, enters email +
-   password + access code. The client:
-   1. Calls `POST /auth/validate-access-code` (read-only check) to surface
-      a UX-friendly error before creating a Firebase account.
-   2. Creates the Firebase account via the SDK.
-   3. Calls `POST /auth/register` with the same access code; the server
-      consumes the code and inserts a `restaurant_users` row binding the
-      Firebase UID to the restaurant.
-3. **Sign in.** Existing users sign in via the Firebase SDK directly. The
-   client then calls `GET /auth/session` to resolve the restaurant
-   binding. **If the response is `404 restaurant_not_found`, the client
-   MUST sign the user out of Firebase and return to the sign-in screen
-   with an error.** This protects against orphaned Firebase accounts and
-   against users whose binding has been revoked.
-4. **Sign out.** Client-side `signOut()` on the Firebase SDK; the backend
-   has no session to terminate.
+1. Split the JWT into `header.payload.signature`.
+2. Read the `kid` from the header.
+3. Fetch Google's public signing certs from
+   `https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com`.
+   - Cache the response in KV (`CACHE`) keyed by `firebase:certs`, honoring the
+     `Cache-Control: max-age` header Google returns (typically a few hours).
+4. Verify the RS256 signature against the cert matching `kid`.
+5. Validate claims, rejecting with `401 unauthorized` if any fail:
+   - `aud === FIREBASE_PROJECT_ID`
+   - `iss === "https://securetoken.google.com/" + FIREBASE_PROJECT_ID`
+   - `exp > now` and `iat <= now`
+   - `sub` is non-empty (this is the Firebase **UID**)
+6. Expose `uid = payload.sub` and `email = payload.email` to downstream handlers.
 
-### Why two endpoints for sign-up
+### 5.3 Resolving the restaurant (multi-tenancy)
 
-`validate-access-code` is **read-only** so the UX can show "Code looks
-good — joining: Boiler Bowl Co." before the user submits a password. The
-actual consumption and binding happens atomically in `register` so a
-mistyped password (which fails before Firebase creates the user) never
-burns a code, and a successful registration is one DB transaction.
-
-### 401 vs 403 vs 404
-
-- `401 unauthorized` — token missing, expired, or signature invalid.
-- `403 forbidden` — token valid but the user is bound to a different
-  restaurant than the requested resource.
-- `404 restaurant_not_found` — token valid, no `restaurant_users` row exists
-  for this UID. **The only response that triggers an automatic client-side
-  Firebase sign-out.**
-
-All error responses follow the [error contract](#error-contract).
-
-## Conventions
-
-- **Base URL**: `/api/v1` (e.g. `https://api.uplate.app/api/v1`).
-- **Content type**: `application/json; charset=utf-8` for all bodies.
-- **IDs**: ULIDs encoded as strings (e.g. `01J7Z8R6XK6PYJ2H6Q1RKWNYG3`).
-  Server generates IDs; clients never send IDs on create.
-- **Dates**:
-  - Calendar dates (campaign start/end, metric day): ISO-8601 `YYYY-MM-DD`.
-  - Timestamps (`createdAt`, `updatedAt`): RFC 3339 in UTC (e.g.
-    `2026-05-25T14:32:01Z`).
-- **Hours**: integers `0`–`23` (`endHour` may equal `startHour` to mean
-  24-hour coverage; `endHour < startHour` means the window wraps midnight).
-- **Enums**: lowercase strings, exact spellings listed under [Shared DTO
-  types](#shared-dto-types). Server rejects unknown values with `422`.
-- **Soft-delete**: not used. Deletes are hard but the server emits a
-  `deleted_at` audit row (out of scope here).
-- **Idempotency**: `POST` endpoints that create resources accept an optional
-  `Idempotency-Key` header; repeated calls with the same key within 24h
-  return the original response.
-- **Concurrency**: every mutable entity carries `updatedAt`. Clients echo it
-  back via `If-Match: <updatedAt>` on `PATCH`/`PUT`/`DELETE` to opt into
-  optimistic concurrency. Mismatch returns `409`.
-- **Pagination**: only used on `/api/v1/ads` (the library can grow long).
-  All other list endpoints are bounded by a small per-restaurant cap and
-  return the full collection.
-
----
-
-## SQL schema
-
-The schema targets PostgreSQL 15+. It is portable to MySQL 8 / SQL Server
-with trivial dialect changes (replace `TIMESTAMPTZ` with `TIMESTAMP WITH TIME
-ZONE`, use generated columns instead of triggers, etc.).
-
-### Enums
+A Firebase UID is bound to exactly one restaurant via the `restaurant_users`
+table. After verifying the token, the auth middleware:
 
 ```sql
-CREATE TYPE status_enum         AS ENUM ('active', 'paused');
-CREATE TYPE priority_enum       AS ENUM ('required', 'high', 'medium', 'low');
-CREATE TYPE ad_location_enum    AS ENUM ('homeScreen', 'diningHallMenu');
-CREATE TYPE audience_tag_enum   AS ENUM (
-  'highProtein', 'highCarb', 'postWorkout', 'lowCalorie', 'macroFriendly'
-);
-CREATE TYPE dietary_pref_enum   AS ENUM (
-  'vegetarian', 'vegan', 'glutenFree', 'dairyFree',
-  'kosher', 'halal', 'pescatarian'
-);
-CREATE TYPE allergy_enum        AS ENUM (
-  'peanuts', 'treeNuts', 'shellfish', 'eggs', 'soy', 'dairy', 'wheat'
-);
-CREATE TYPE day_of_week_enum    AS ENUM (
-  'mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'
-);
-CREATE TYPE ad_event_type_enum  AS ENUM ('impression', 'click');
+SELECT restaurant_id, role FROM restaurant_users WHERE firebase_uid = ?1;
 ```
 
-### `restaurant_users`
+- **Found** → attach `{ uid, email, restaurantId, role }` to the request context.
+  All tenant-scoped queries filter on this `restaurantId`.
+- **Not found** → respond `404 { error.code: "restaurant_not_found" }`. The
+  client treats this as "account not linked," signs the user out, and returns to
+  login (see `resolveSession` in `AuthContext.tsx`). This is expected for a
+  freshly created Firebase user that has not completed `/auth/register` yet.
 
-Binds a Firebase UID to a restaurant. One restaurant can have many users;
-one user (UID) maps to exactly one restaurant.
+### 5.4 Access codes & registration
 
-| Column          | Type           | Constraints                                            |
-|-----------------|----------------|--------------------------------------------------------|
-| `firebase_uid`  | `TEXT`         | PK — exact value from the verified Firebase token      |
-| `restaurant_id` | `TEXT`         | NOT NULL, FK → `restaurants(id)` ON DELETE CASCADE     |
-| `email`         | `TEXT`         | NOT NULL — denormalized from Firebase for ops queries  |
-| `created_at`    | `TIMESTAMPTZ`  | NOT NULL DEFAULT `now()`                               |
+A restaurant is onboarded out-of-band (admin tooling using `ADMIN_API_KEY`),
+which creates a `restaurants` row and one or more single-use rows in
+`access_codes`. The sign-up flow (`SignUp.tsx` → `AuthContext.signUp`) is:
 
-Indexes:
+1. **Client** calls `POST /auth/validate-access-code` (debounced, as the user
+   types) to preview which restaurant the code unlocks. Read-only; never
+   consumes the code.
+2. Client creates the Firebase user (`createUserWithEmailAndPassword`).
+3. **Client** calls `POST /auth/register` with the same access code and the new
+   user's ID token. The server **atomically** consumes the code and binds the
+   UID to the restaurant.
+4. If `register` fails (code already consumed, race, etc.), the client deletes
+   the just-created Firebase user and surfaces the error. Your error codes must
+   be precise so this path works (see §10.1).
+
+**Atomic consume** (single `batch()` / conditional update to prevent double-use):
 
 ```sql
-CREATE INDEX restaurant_users_by_restaurant
-  ON restaurant_users (restaurant_id);
-CREATE UNIQUE INDEX restaurant_users_email_unique
-  ON restaurant_users (lower(email));
-```
-
-A `404 restaurant_not_found` from `GET /auth/session` literally means "no
-row in this table for the verified UID."
-
-### `access_codes`
-
-Single-use codes minted by UPlate operators to onboard a restaurant. Each
-code redeems into a `restaurant_users` row.
-
-| Column          | Type           | Constraints                                                 |
-|-----------------|----------------|-------------------------------------------------------------|
-| `code`          | `TEXT`         | PK — case-insensitive (store uppercased); format `UPLATE-XXXX` |
-| `restaurant_id` | `TEXT`         | NOT NULL, FK → `restaurants(id)` ON DELETE CASCADE          |
-| `created_by`    | `TEXT`         | nullable — operator identifier, for audit                   |
-| `created_at`    | `TIMESTAMPTZ`  | NOT NULL DEFAULT `now()`                                    |
-| `expires_at`    | `TIMESTAMPTZ`  | nullable — `NULL` ⇒ no expiry                               |
-| `consumed_at`   | `TIMESTAMPTZ`  | nullable — set on successful `POST /auth/register`          |
-| `consumed_by_uid` | `TEXT`       | nullable — Firebase UID that consumed it                    |
-
-Indexes:
-
-```sql
-CREATE INDEX access_codes_by_restaurant ON access_codes (restaurant_id);
-```
-
-A code is **valid for redemption** iff `consumed_at IS NULL` AND
-(`expires_at IS NULL` OR `expires_at > now()`).
-
-### `restaurants`
-
-One row per tenant. Owns every other entity.
-
-| Column           | Type           | Constraints                                      |
-|------------------|----------------|--------------------------------------------------|
-| `id`             | `TEXT`         | PK                                               |
-| `name`           | `TEXT`         | nullable                                         |
-| `icon_url`       | `TEXT`         | nullable                                         |
-| `contact_email`  | `TEXT`         | nullable, used by notifications                  |
-| `email_weekly`   | `BOOLEAN`      | NOT NULL DEFAULT TRUE                            |
-| `email_alerts`   | `BOOLEAN`      | NOT NULL DEFAULT TRUE                            |
-| `sms_alerts`     | `BOOLEAN`      | NOT NULL DEFAULT FALSE                           |
-| `created_at`     | `TIMESTAMPTZ`  | NOT NULL DEFAULT `now()`                         |
-| `updated_at`     | `TIMESTAMPTZ`  | NOT NULL DEFAULT `now()`, trigger-bumped on row update |
-
-### `campaigns`
-
-| Column          | Type          | Constraints                                                       |
-|-----------------|---------------|-------------------------------------------------------------------|
-| `id`            | `TEXT`        | PK                                                                |
-| `restaurant_id` | `TEXT`        | NOT NULL, FK → `restaurants(id)` ON DELETE CASCADE                |
-| `name`          | `TEXT`        | NOT NULL                                                          |
-| `status`        | `status_enum` | NOT NULL DEFAULT `'paused'`                                       |
-| `start_date`    | `DATE`        | NOT NULL                                                          |
-| `end_date`      | `DATE`        | NOT NULL                                                          |
-| `sort_order`    | `INTEGER`     | NOT NULL — newest-first ordering; lower = earlier in list         |
-| `created_at`    | `TIMESTAMPTZ` | NOT NULL DEFAULT `now()`                                          |
-| `updated_at`    | `TIMESTAMPTZ` | NOT NULL DEFAULT `now()`, trigger-bumped                          |
-
-Indexes:
-
-```sql
-CREATE INDEX campaigns_by_restaurant_order
-  ON campaigns (restaurant_id, sort_order ASC);
-CREATE INDEX campaigns_by_restaurant_updated
-  ON campaigns (restaurant_id, updated_at DESC);
-```
-
-`sort_order` replaces the client-side `campaignOrder: string[]`. The server
-keeps it dense (no gaps); on create it shifts existing rows down with a
-single `UPDATE … SET sort_order = sort_order + 1`.
-
-### `ads`
-
-| Column                | Type                | Constraints                                                  |
-|-----------------------|---------------------|--------------------------------------------------------------|
-| `id`                  | `TEXT`              | PK                                                           |
-| `restaurant_id`       | `TEXT`              | NOT NULL, FK → `restaurants(id)` ON DELETE CASCADE           |
-| `campaign_id`         | `TEXT`              | NOT NULL, FK → `campaigns(id)` ON DELETE CASCADE             |
-| `title`               | `TEXT`              | NOT NULL                                                     |
-| `description`         | `TEXT`              | NOT NULL DEFAULT `''`                                        |
-| `redirect_url`        | `TEXT`              | NOT NULL DEFAULT `''`                                        |
-| `creative_url`        | `TEXT`              | nullable                                                     |
-| `icon_url`            | `TEXT`              | nullable                                                     |
-| `status`              | `status_enum`       | NOT NULL DEFAULT `'paused'`                                  |
-| `location`            | `ad_location_enum`  | NOT NULL DEFAULT `'homeScreen'`                              |
-| `recurring_customer`  | `BOOLEAN`           | NOT NULL DEFAULT FALSE                                       |
-| `recurring_priority`  | `priority_enum`     | NOT NULL DEFAULT `'medium'`                                  |
-| `time_start_hour`     | `SMALLINT`          | nullable, 0–23, NULL ⇒ no time window                        |
-| `time_end_hour`       | `SMALLINT`          | nullable, 0–23, NOT NULL when `time_start_hour` is NOT NULL  |
-| `created_at`          | `TIMESTAMPTZ`       | NOT NULL DEFAULT `now()`                                     |
-| `updated_at`          | `TIMESTAMPTZ`       | NOT NULL DEFAULT `now()`, trigger-bumped                     |
-
-Indexes:
-
-```sql
-CREATE INDEX ads_by_campaign        ON ads (campaign_id);
-CREATE INDEX ads_by_restaurant_upd  ON ads (restaurant_id, updated_at DESC);
-CREATE INDEX ads_by_status          ON ads (restaurant_id, status);
-CREATE INDEX ads_title_trgm         ON ads USING gin (lower(title) gin_trgm_ops);
-```
-
-The trigram index supports server-side title search for the Ads Library.
-
-### `ad_audience_tags`
-
-Composite-key child table. One row per (ad, tag).
-
-| Column     | Type                | Constraints                          |
-|------------|---------------------|--------------------------------------|
-| `ad_id`    | `TEXT`              | PK part 1, FK → `ads(id)` CASCADE    |
-| `tag`      | `audience_tag_enum` | PK part 2                            |
-| `priority` | `priority_enum`     | NOT NULL                             |
-
-### `ad_dietary_rules`
-
-| Column     | Type                | Constraints                          |
-|------------|---------------------|--------------------------------------|
-| `ad_id`    | `TEXT`              | PK part 1, FK → `ads(id)` CASCADE    |
-| `pref`     | `dietary_pref_enum` | PK part 2                            |
-| `priority` | `priority_enum`     | NOT NULL                             |
-
-### `ad_food_interests`
-
-Free-text food interests. Names are case-insensitive unique per ad.
-
-| Column     | Type            | Constraints                          |
-|------------|-----------------|--------------------------------------|
-| `ad_id`    | `TEXT`          | PK part 1, FK → `ads(id)` CASCADE    |
-| `name`     | `TEXT`          | PK part 2 (UNIQUE lower(name) per ad) |
-| `priority` | `priority_enum` | NOT NULL                             |
-
-### `ad_exclusions`
-
-| Column    | Type           | Constraints                          |
-|-----------|----------------|--------------------------------------|
-| `ad_id`   | `TEXT`         | PK part 1, FK → `ads(id)` CASCADE    |
-| `allergy` | `allergy_enum` | PK part 2                            |
-
-### `ad_time_days`
-
-| Column  | Type               | Constraints                          |
-|---------|--------------------|--------------------------------------|
-| `ad_id` | `TEXT`             | PK part 1, FK → `ads(id)` CASCADE    |
-| `day`   | `day_of_week_enum` | PK part 2                            |
-
-### `ad_events`
-
-Per-event analytics rows. **One row per impression or click**, with a snapshot
-of the viewer's audience signals at the moment the event happened. This is
-the single source of truth for everything in [Analytics](#analytics) —
-including the wire-format `AnalyticsPoint` series, which is derived by
-bucketing on `occurred_at::date`.
-
-Each event captures only the **scalar** viewer attributes (recurring vs new,
-optional `user_id`). Multi-valued signals (audience tags, dietary
-preferences, food interests) live in child tables below — a single click
-that matched three audience tags writes one `ad_events` row plus three
-`ad_event_tags` rows.
-
-| Column                | Type             | Constraints                                          |
-|-----------------------|------------------|------------------------------------------------------|
-| `id`                  | `TEXT`           | PK (ULID)                                            |
-| `restaurant_id`       | `TEXT`           | NOT NULL, FK → `restaurants(id)` ON DELETE CASCADE   |
-| `ad_id`               | `TEXT`           | NOT NULL, FK → `ads(id)` ON DELETE CASCADE           |
-| `event_type`          | `ad_event_type_enum` | NOT NULL — `'impression'` or `'click'`          |
-| `occurred_at`         | `TIMESTAMPTZ`    | NOT NULL — true wall-clock time of the event         |
-| `user_id`             | `TEXT`           | nullable — UPlate end-user id (anonymous OK)         |
-| `recurring_customer`  | `BOOLEAN`        | NOT NULL — was the viewer a repeat customer?         |
-
-`ad_event_type_enum` is created alongside the other enums in
-[Enums](#enums):
-
-```sql
-CREATE TYPE ad_event_type_enum AS ENUM ('impression', 'click');
-```
-
-Indexes:
-
-```sql
-CREATE INDEX ad_events_by_ad_time
-  ON ad_events (ad_id, occurred_at DESC);
-CREATE INDEX ad_events_by_ad_type_time
-  ON ad_events (ad_id, event_type, occurred_at);
-CREATE INDEX ad_events_by_restaurant_time
-  ON ad_events (restaurant_id, occurred_at DESC);
-```
-
-The dashboard never paginates this table directly. All reads go through
-aggregation queries — see [Endpoints](#endpoints).
-
-#### Derived daily series
-
-The previous schema stored a separate `ad_daily_metrics(ad_id, metric_date,
-impressions, clicks)` table. That has been removed: with audience signals
-attached to each event, daily aggregates fall out of a single GROUP BY:
-
-```sql
-SELECT
-  date_trunc('day', occurred_at)::date AS metric_date,
-  count(*) FILTER (WHERE event_type = 'impression') AS impressions,
-  count(*) FILTER (WHERE event_type = 'click')      AS clicks
-FROM ad_events
-WHERE ad_id = $1 AND occurred_at >= $2 AND occurred_at < $3
-GROUP BY 1
-ORDER BY 1;
-```
-
-Volume forecast: a busy restaurant tops out around ~10⁵ impressions/day
-across all ads. The `(ad_id, occurred_at DESC)` index keeps the daily/90-day
-queries in milliseconds even at 100×. If a deployment outgrows that, the
-recommended next step is a materialized view refreshed nightly — **not** a
-second canonical table.
-
-### `ad_event_tags`
-
-Audience tags the viewer matched at event time. A click can write multiple
-rows (e.g. a user tagged `highProtein` AND `postWorkout` writes two).
-
-| Column      | Type                | Constraints                              |
-|-------------|---------------------|------------------------------------------|
-| `event_id`  | `TEXT`              | PK part 1, FK → `ad_events(id)` CASCADE  |
-| `tag`       | `audience_tag_enum` | PK part 2                                |
-
-Indexes:
-
-```sql
-CREATE INDEX ad_event_tags_by_tag ON ad_event_tags (tag);
-```
-
-### `ad_event_dietary`
-
-Dietary preferences the viewer carried at event time.
-
-| Column      | Type                | Constraints                              |
-|-------------|---------------------|------------------------------------------|
-| `event_id`  | `TEXT`              | PK part 1, FK → `ad_events(id)` CASCADE  |
-| `pref`      | `dietary_pref_enum` | PK part 2                                |
-
-Indexes:
-
-```sql
-CREATE INDEX ad_event_dietary_by_pref ON ad_event_dietary (pref);
-```
-
-### `ad_event_food_interests`
-
-Free-text food interests the viewer had marked at event time. Lower-cased
-unique per event.
-
-| Column      | Type    | Constraints                                          |
-|-------------|---------|------------------------------------------------------|
-| `event_id`  | `TEXT`  | PK part 1, FK → `ad_events(id)` CASCADE              |
-| `name`      | `TEXT`  | PK part 2 (UNIQUE lower(name) per event)             |
-
-Indexes:
-
-```sql
-CREATE INDEX ad_event_food_interests_by_name
-  ON ad_event_food_interests (lower(name));
-```
-
-### Triggers
-
-```sql
-CREATE OR REPLACE FUNCTION touch_updated_at() RETURNS TRIGGER AS $$
-BEGIN
-  NEW.updated_at = now();
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER trg_restaurants_updated BEFORE UPDATE ON restaurants
-  FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
-CREATE TRIGGER trg_campaigns_updated   BEFORE UPDATE ON campaigns
-  FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
-CREATE TRIGGER trg_ads_updated         BEFORE UPDATE ON ads
-  FOR EACH ROW EXECUTE FUNCTION touch_updated_at();
-```
-
-When child tables of an ad change (targeting), application code should
-`UPDATE ads SET updated_at = now()` for the parent so the client's
-`If-Match` continues to work.
-
----
-
-## Shared DTO types
-
-These TypeScript declarations are the canonical wire shapes. They are
-**deliberately** the same as the in-app types in `src/types/index.ts` plus a
-small set of analytics-only shapes — the client should be able to import
-them directly from `src/api/types.ts`.
-
-### Auth DTOs
-
-```ts
-export interface ValidateAccessCodeRequest { accessCode: string }
-export interface ValidateAccessCodeResponse {
-  valid: boolean;
-  /** Lightweight preview shown on the sign-up screen. Present only when valid. */
-  restaurant?: { id: string; name: string };
-}
-
-export interface RegisterRequest { accessCode: string }
-export interface RegisterResponse {
-  restaurantId: string;
-  restaurant: RestaurantProfile;
-}
-
-export interface AuthSessionResponse {
-  restaurantId: string;
-  restaurant: RestaurantProfile;
-}
-```
-
-```ts
-// Enum primitives (match the SQL enums above byte-for-byte)
-export type Status         = 'active' | 'paused';
-export type Priority       = 'required' | 'high' | 'medium' | 'low';
-export type AdLocation     = 'homeScreen' | 'diningHallMenu';
-export type DayOfWeek      = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
-export type AudienceTag    =
-  | 'highProtein' | 'highCarb' | 'postWorkout' | 'lowCalorie' | 'macroFriendly';
-export type DietaryPreference =
-  | 'vegetarian' | 'vegan' | 'glutenFree' | 'dairyFree'
-  | 'kosher' | 'halal' | 'pescatarian';
-export type Allergy =
-  | 'peanuts' | 'treeNuts' | 'shellfish' | 'eggs' | 'soy' | 'dairy' | 'wheat';
-
-// Targeting building blocks
-export interface AudienceTagRule  { tag: AudienceTag;        priority: Priority }
-export interface DietaryRule      { pref: DietaryPreference; priority: Priority }
-export interface FoodInterestRule { name: string;            priority: Priority }
-export interface TimeRange        { startHour: number;       endHour: number }
-export interface BehavioralTargeting {
-  recurringCustomer: boolean;
-  recurringPriority: Priority;
-}
-export interface TimeTargeting {
-  range: TimeRange | null;
-  days: DayOfWeek[];
-}
-export interface Targeting {
-  audienceTags: AudienceTagRule[];
-  dietary:      DietaryRule[];
-  foodInterests: FoodInterestRule[];
-  exclusions:   Allergy[];
-  behavioral:   BehavioralTargeting;
-  time:         TimeTargeting;
-}
-
-// Analytics
-export interface AnalyticsPoint { date: string; impressions: number; clicks: number }
-export interface AdMetrics {
-  impressions: number;   // SUM over series
-  clicks: number;        // SUM over series
-  series: AnalyticsPoint[];
-}
-
-// Aggregates returned by /campaigns and /ads list endpoints
-export interface CampaignStats {
-  impressions: number;
-  clicks: number;
-  ctr: number;          // 0..1
-  adCount: number;
-  activeAdCount: number;
-}
-export interface GlobalStats {
-  impressions: number;
-  clicks: number;
-  ctr: number;
-  activeCampaigns: number;
-  activeAds: number;
-  totalCampaigns: number;
-  totalAds: number;
-}
-
-// Entities
-export interface RestaurantProfile {
-  id: string;
-  name?: string;
-  iconUrl?: string;
-  contactEmail?: string;
-  notifications: {
-    weekly: boolean;
-    emailAlerts: boolean;
-    smsAlerts: boolean;
-  };
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface Campaign {
-  id: string;
-  name: string;
-  status: Status;
-  startDate: string;   // YYYY-MM-DD
-  endDate:   string;   // YYYY-MM-DD
-  adIds: string[];     // server-supplied so the client's reducer keeps working
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface Ad {
-  id: string;
-  campaignId: string;
-  title: string;
-  description: string;
-  redirectUrl: string;
-  creativeUrl?: string;
-  iconUrl?: string;
-  status: Status;
-  location: AdLocation;
-  targeting: Targeting;
-  metrics: AdMetrics;
-  createdAt: string;
-  updatedAt: string;
-}
-
-// Inputs (server generates id, createdAt, updatedAt, metrics)
-export interface CampaignInput {
-  name: string;
-  status?: Status;
-  startDate: string;
-  endDate: string;
-}
-export interface AdInput {
-  campaignId: string;
-  title: string;
-  description?: string;
-  redirectUrl?: string;
-  creativeUrl?: string;
-  iconUrl?: string;
-  status?: Status;
-  location?: AdLocation;
-  targeting?: Targeting;
-}
-```
-
----
-
-## Endpoints
-
-Every endpoint lives under `/api/v1`. Path params use `:name`. Authentication
-is required everywhere except `/health` and `POST /auth/validate-access-code`.
-
-### Auth
-
-#### `POST /auth/validate-access-code`
-
-**Description.** Read-only check that an access code is valid. Does **not**
-consume the code. Used by the sign-up screen to surface a friendly error
-before creating a Firebase account. Unauthenticated — anyone can probe a
-code; rate-limit by IP and accept fewer than 10 requests per minute to
-mitigate brute-force enumeration.
-
-**Auth.** None.
-
-**Request body.** `ValidateAccessCodeRequest`.
-
-**Response 200.** `ValidateAccessCodeResponse`. `valid` is `false` for any
-of the following (no further detail is leaked):
-
-- code does not exist
-- code has been consumed (`consumed_at IS NOT NULL`)
-- code has expired (`expires_at < now()`)
-
-When `valid` is `true`, `restaurant` is populated with the bound restaurant's
-public name so the client can render "Joining: Boiler Bowl Co."
-
-**Errors.** `429 rate_limited`; `400 bad_request` on a malformed body.
-
-#### `POST /auth/register`
-
-**Description.** Consumes the access code and binds the authenticated
-Firebase user to the code's restaurant. Idempotent per `Idempotency-Key`,
-but **only one successful registration per code**: a second call with the
-same valid code returns `410 gone`.
-
-**Auth.** Firebase ID token (Bearer). The server uses the verified UID and
-email to insert into `restaurant_users`.
-
-**Request body.** `RegisterRequest`.
-
-**Server behavior (single transaction).**
-
-```sql
-BEGIN;
-SELECT restaurant_id FROM access_codes
-  WHERE upper(code) = upper($1)
-    AND consumed_at IS NULL
-    AND (expires_at IS NULL OR expires_at > now())
-  FOR UPDATE;
--- if no row: ROLLBACK and return 404 access_code_not_found
-INSERT INTO restaurant_users (firebase_uid, restaurant_id, email)
-  VALUES ($uid, $restaurant_id, $email)
-  ON CONFLICT (firebase_uid) DO NOTHING;
--- if zero rows inserted: ROLLBACK and return 409 already_registered
+-- Succeeds only if still unconsumed; rowsAffected === 0 means already used.
 UPDATE access_codes
-  SET consumed_at = now(), consumed_by_uid = $uid
-  WHERE upper(code) = upper($1);
-COMMIT;
+   SET consumed_at = ?now, consumed_by_uid = ?uid
+ WHERE code = ?code AND consumed_at IS NULL;
+-- then, if the update affected a row:
+INSERT INTO restaurant_users (firebase_uid, restaurant_id, role, created_at)
+VALUES (?uid, (SELECT restaurant_id FROM access_codes WHERE code = ?code), 'member', ?now);
 ```
 
-**Response 201.** `RegisterResponse`.
+If the UID already has a binding, `register` is idempotent: return the existing
+binding's restaurant rather than erroring (handles retry after a flaky network).
 
-**Errors.**
+---
 
-| HTTP | `code`                    | When                                              |
-|------|---------------------------|---------------------------------------------------|
-| 401  | `unauthorized`            | No / expired Firebase token.                      |
-| 404  | `access_code_not_found`   | Unknown, expired, or never-existed code.          |
-| 409  | `already_registered`      | This UID is already bound to a restaurant.        |
-| 410  | `access_code_consumed`    | Code exists but `consumed_at IS NOT NULL`.        |
-| 422  | `validation_failed`       | Empty / malformed accessCode.                     |
+## 6. Global conventions
 
-When the client receives any of `404 / 410 / 409`, the sign-up flow
-**deletes the just-created Firebase user** (`deleteUser()` in the Web SDK)
-and surfaces the error on the sign-up screen so the same email can be
-retried with a correct code.
+### 6.1 Base URL & paths
 
-#### `GET /auth/session`
+The frontend prepends `VITE_API_BASE_URL` to every path. All paths in this
+document are written **relative to that base** exactly as they appear in
+`src/api/http.ts` (e.g. `/bootstrap`, `/campaigns/:id`). If you deploy under a
+prefix (e.g. `https://api.u-plate.com/v1`), set `VITE_API_BASE_URL` to include
+it; the Worker routes should be mounted to match.
 
-**Description.** Resolve the authenticated user's restaurant binding.
-This is the **first** authenticated call the client makes after a Firebase
-sign-in completes; it determines whether to load the dashboard or send the
-user back to the sign-in screen.
+### 6.2 IDs
 
-**Auth.** Firebase ID token.
+- `restaurant_id`, `campaign_id`, `ad_id`, `event_id`, `access_code` are all
+  `TEXT`. Generate ULIDs or `crypto.randomUUID()` server-side for new entities.
+- IDs are opaque to the client. The reference adapter uses `c1`, `a1`, etc.; the
+  real backend should use unguessable IDs but the client treats them as strings.
 
-**Response 200.** `AuthSessionResponse`.
+### 6.3 Timestamps
 
-**Errors.**
+- All stored and returned timestamps are ISO-8601 UTC strings with millisecond
+  precision (`createdAt`, `updatedAt`, `occurredAt`, `serverTime`).
+- `startDate` / `endDate` on campaigns are **date-only** strings (`YYYY-MM-DD`),
+  matching the reference data.
 
-| HTTP | `code`                     | Client behavior |
-|------|----------------------------|-----------------|
-| 401  | `unauthorized`             | Token problem — re-fetch token or send back to sign-in. |
-| 404  | `restaurant_not_found`     | **No `restaurant_users` row for this UID.** Client signs the Firebase user out and returns to the sign-in screen with the message "Your account is not linked to a restaurant." |
+### 6.4 Day-of-week & hour bucketing (critical for analytics)
 
-### Bootstrap
+The dashboard's heatmaps and click-signal arrays are **Monday-indexed**:
+`day 0 = Monday … day 6 = Sunday`, matching `(jsDate.getDay() + 6) % 7` and the
+`DAYS` order in `src/data/constants.ts` (`['mon','tue','wed','thu','fri','sat','sun']`).
+
+Hour buckets are `0..23`. Because "peak hour" and the day/hour heatmaps are
+meaningful only in **campus-local time**, compute `dow` and `hour` in
+`APP_TIMEZONE` (default `America/Indiana/Indianapolis`), not UTC. Do this **once
+at ingest time** and store `dow` and `hour` as columns on `ad_events` (§7) so
+analytics queries are pure `GROUP BY` with no per-row timezone math.
+
+### 6.5 Optimistic concurrency (ETags / `If-Match`)
+
+`campaigns` and `ads` carry an integer `version` column, bumped on every write.
+
+- Detail GETs (`/campaigns/:id`, `/ads/:id`) return an `ETag: "<version>"` header.
+- Mutating requests **may** include `If-Match: "<version>"` (the client passes
+  `ifMatch` through `http.ts`). When present, the write must `... WHERE id=? AND
+  version=?`; if `rowsAffected === 0`, the entity was modified concurrently —
+  respond `412 { error.code: "version_conflict" }`.
+- When `If-Match` is absent, perform a last-writer-wins update (still bump
+  `version`). The client currently calls most mutations without `ifMatch`, so
+  absence must be tolerated.
+
+### 6.6 CTR
+
+`ctr = impressions === 0 ? 0 : clicks / impressions`. Always a raw ratio in
+`[0,1]` (the frontend formats the percentage). Never pre-multiply by 100.
+
+### 6.7 JSON, casing, nulls
+
+- Request/response bodies are JSON, `Content-Type: application/json`.
+- Field names are **camelCase** on the wire (DTOs in §9), even though D1 columns
+  are snake_case. The repository layer maps between them.
+- `PATCH` semantics: omitted fields are untouched; explicit `null` clears a
+  nullable field (see `RestaurantPatch`, `AdPatch.iconUrl`).
+
+### 6.8 CORS
+
+Respond to `OPTIONS` preflight and set, on every response:
+
+```
+Access-Control-Allow-Origin: <echo request Origin if in ALLOWED_ORIGINS>
+Access-Control-Allow-Methods: GET,POST,PATCH,PUT,DELETE,OPTIONS
+Access-Control-Allow-Headers: Authorization,Content-Type,If-Match
+Access-Control-Expose-Headers: ETag
+Access-Control-Max-Age: 86400
+Vary: Origin
+```
+
+---
+
+## 7. D1 database schema
+
+`migrations/0001_init.sql`. Enable foreign keys and use `ON DELETE CASCADE` so
+deleting a campaign or ad cascades to its children and events.
+
+```sql
+PRAGMA foreign_keys = ON;
+
+-- ─────────────────────────────────────────────────────────────
+-- Tenancy & auth
+-- ─────────────────────────────────────────────────────────────
+CREATE TABLE restaurants (
+  id              TEXT PRIMARY KEY,
+  name            TEXT,
+  icon_url        TEXT,
+  contact_email   TEXT,
+  notify_weekly   INTEGER NOT NULL DEFAULT 1,  -- bool
+  notify_email    INTEGER NOT NULL DEFAULT 1,  -- bool (emailAlerts)
+  created_at      TEXT NOT NULL,
+  updated_at      TEXT NOT NULL
+);
+
+CREATE TABLE restaurant_users (
+  firebase_uid    TEXT PRIMARY KEY,
+  restaurant_id   TEXT NOT NULL REFERENCES restaurants(id) ON DELETE CASCADE,
+  role            TEXT NOT NULL DEFAULT 'member',  -- 'owner' | 'member'
+  created_at      TEXT NOT NULL
+);
+CREATE INDEX idx_restaurant_users_rid ON restaurant_users(restaurant_id);
+
+CREATE TABLE access_codes (
+  code            TEXT PRIMARY KEY,         -- e.g. 'UPLATE-7Q2F'
+  restaurant_id   TEXT NOT NULL REFERENCES restaurants(id) ON DELETE CASCADE,
+  consumed_at     TEXT,                     -- NULL = still valid
+  consumed_by_uid TEXT,
+  created_at      TEXT NOT NULL,
+  expires_at      TEXT                      -- NULL = no expiry
+);
+CREATE INDEX idx_access_codes_rid ON access_codes(restaurant_id);
+
+-- ─────────────────────────────────────────────────────────────
+-- Campaigns
+-- ─────────────────────────────────────────────────────────────
+CREATE TABLE campaigns (
+  id              TEXT PRIMARY KEY,
+  restaurant_id   TEXT NOT NULL REFERENCES restaurants(id) ON DELETE CASCADE,
+  name            TEXT NOT NULL,
+  status          TEXT NOT NULL DEFAULT 'paused',  -- 'active' | 'paused'
+  start_date      TEXT NOT NULL,            -- 'YYYY-MM-DD'
+  end_date        TEXT NOT NULL,            -- 'YYYY-MM-DD'
+  sort_order      INTEGER NOT NULL,         -- drives campaignOrder (asc)
+  version         INTEGER NOT NULL DEFAULT 1,
+  created_at      TEXT NOT NULL,
+  updated_at      TEXT NOT NULL
+);
+CREATE INDEX idx_campaigns_rid_order  ON campaigns(restaurant_id, sort_order);
+CREATE INDEX idx_campaigns_rid_status ON campaigns(restaurant_id, status);
+
+-- ─────────────────────────────────────────────────────────────
+-- Ads
+-- ─────────────────────────────────────────────────────────────
+CREATE TABLE ads (
+  id                  TEXT PRIMARY KEY,
+  restaurant_id       TEXT NOT NULL REFERENCES restaurants(id) ON DELETE CASCADE,
+  campaign_id         TEXT NOT NULL REFERENCES campaigns(id) ON DELETE CASCADE,
+  title               TEXT NOT NULL,
+  description         TEXT NOT NULL DEFAULT '',
+  redirect_url        TEXT NOT NULL DEFAULT '',
+  icon_url            TEXT,
+  status              TEXT NOT NULL DEFAULT 'paused',     -- 'active' | 'paused'
+  location            TEXT NOT NULL DEFAULT 'homeScreen', -- 'homeScreen' | 'diningHallMenu'
+  -- behavioral targeting
+  recurring_customer  INTEGER NOT NULL DEFAULT 0,      -- bool
+  recurring_priority  TEXT NOT NULL DEFAULT 'medium',  -- Priority
+  -- time targeting window (NULL window = no time restriction)
+  time_start_hour     INTEGER,                          -- 0..23 or NULL
+  time_end_hour       INTEGER,                          -- 0..23 or NULL (may wrap < start)
+  version             INTEGER NOT NULL DEFAULT 1,
+  created_at          TEXT NOT NULL,
+  updated_at          TEXT NOT NULL
+);
+CREATE INDEX idx_ads_rid_campaign ON ads(restaurant_id, campaign_id);
+CREATE INDEX idx_ads_rid_status   ON ads(restaurant_id, status);
+CREATE INDEX idx_ads_rid_updated  ON ads(restaurant_id, updated_at);
+
+-- Targeting children (each row = one rule). Priority is one of
+-- 'required' | 'high' | 'medium' | 'low'.
+CREATE TABLE ad_audience_tags (
+  ad_id     TEXT NOT NULL REFERENCES ads(id) ON DELETE CASCADE,
+  tag       TEXT NOT NULL,    -- AudienceTag
+  priority  TEXT NOT NULL,
+  PRIMARY KEY (ad_id, tag)
+);
+
+CREATE TABLE ad_dietary (
+  ad_id     TEXT NOT NULL REFERENCES ads(id) ON DELETE CASCADE,
+  pref      TEXT NOT NULL,    -- DietaryPreference
+  priority  TEXT NOT NULL,
+  PRIMARY KEY (ad_id, pref)
+);
+
+CREATE TABLE ad_food_interests (
+  ad_id     TEXT NOT NULL REFERENCES ads(id) ON DELETE CASCADE,
+  name      TEXT NOT NULL,    -- free-text food interest (store original case)
+  priority  TEXT NOT NULL,
+  PRIMARY KEY (ad_id, name)
+);
+
+CREATE TABLE ad_exclusions (
+  ad_id     TEXT NOT NULL REFERENCES ads(id) ON DELETE CASCADE,
+  allergy   TEXT NOT NULL,    -- Allergy
+  PRIMARY KEY (ad_id, allergy)
+);
+
+CREATE TABLE ad_target_days (
+  ad_id     TEXT NOT NULL REFERENCES ads(id) ON DELETE CASCADE,
+  day       TEXT NOT NULL,    -- DayOfWeek 'mon'..'sun'
+  PRIMARY KEY (ad_id, day)
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- Events (written by the consumer app, §12). One row per impression/click.
+-- dow (0=Mon..6=Sun) and hour (0..23) are precomputed in APP_TIMEZONE.
+-- ─────────────────────────────────────────────────────────────
+CREATE TABLE ad_events (
+  id                 TEXT PRIMARY KEY,
+  restaurant_id      TEXT NOT NULL REFERENCES restaurants(id) ON DELETE CASCADE,
+  ad_id              TEXT NOT NULL REFERENCES ads(id) ON DELETE CASCADE,
+  type               TEXT NOT NULL,        -- 'impression' | 'click'
+  occurred_at        TEXT NOT NULL,        -- ISO-8601 UTC
+  occurred_date      TEXT NOT NULL,        -- 'YYYY-MM-DD' (UTC slice, for daily series)
+  dow                INTEGER NOT NULL,     -- 0=Mon..6=Sun, APP_TIMEZONE
+  hour               INTEGER NOT NULL,     -- 0..23, APP_TIMEZONE
+  user_id            TEXT,                 -- opaque consumer user id (nullable)
+  recurring_customer INTEGER NOT NULL DEFAULT 0  -- bool
+);
+CREATE INDEX idx_events_rid_date ON ad_events(restaurant_id, occurred_date);
+CREATE INDEX idx_events_ad_type  ON ad_events(ad_id, type);
+CREATE INDEX idx_events_ad_date  ON ad_events(ad_id, occurred_date);
+
+-- Multi-valued audience signals snapshotted at event time. ad_id is
+-- denormalized onto each so click-signal aggregation needs no join back to
+-- ad_events. (Matches the shape documented in src/types/index.ts.)
+CREATE TABLE ad_event_tags (
+  event_id  TEXT NOT NULL REFERENCES ad_events(id) ON DELETE CASCADE,
+  ad_id     TEXT NOT NULL,
+  tag       TEXT NOT NULL,
+  PRIMARY KEY (event_id, tag)
+);
+CREATE INDEX idx_event_tags_ad ON ad_event_tags(ad_id, tag);
+
+CREATE TABLE ad_event_dietary (
+  event_id  TEXT NOT NULL REFERENCES ad_events(id) ON DELETE CASCADE,
+  ad_id     TEXT NOT NULL,
+  pref      TEXT NOT NULL,
+  PRIMARY KEY (event_id, pref)
+);
+CREATE INDEX idx_event_dietary_ad ON ad_event_dietary(ad_id, pref);
+
+CREATE TABLE ad_event_food_interests (
+  event_id  TEXT NOT NULL REFERENCES ad_events(id) ON DELETE CASCADE,
+  ad_id     TEXT NOT NULL,
+  name      TEXT NOT NULL,    -- store normalized lowercase for grouping
+  PRIMARY KEY (event_id, name)
+);
+CREATE INDEX idx_event_food_ad ON ad_event_food_interests(ad_id, name);
+```
+
+### 7.1 Mapping a stored ad back to the `Targeting` DTO
+
+When returning an `Ad`, assemble the nested `Targeting` object from the children:
+
+```ts
+targeting = {
+  audienceTags:  ad_audience_tags rows  → [{ tag, priority }],
+  dietary:       ad_dietary rows        → [{ pref, priority }],
+  foodInterests: ad_food_interests rows → [{ name, priority }],
+  exclusions:    ad_exclusions rows     → [allergy, ...],
+  behavioral:    { recurringCustomer: !!ads.recurring_customer,
+                   recurringPriority: ads.recurring_priority },
+  time:          { range: ads.time_start_hour == null ? null
+                          : { startHour: ads.time_start_hour, endHour: ads.time_end_hour },
+                   days: ad_target_days rows → ['mon', ...] },
+}
+```
+
+On writes that include `targeting`, replace the child rows wholesale inside the
+mutation's `batch()` (delete-all-then-insert for that `ad_id`), and set the
+behavioral/time columns on `ads`.
+
+---
+
+## 8. Request lifecycle & middleware
+
+Order of middleware in the Hono app:
+
+1. **CORS** (§6.8) — handles `OPTIONS`, sets headers on all responses.
+2. **Error boundary** (§14) — wraps handlers; converts thrown `ApiError` (and
+   unexpected errors) into the JSON error body, attaches a `requestId`
+   (`crypto.randomUUID()`), logs server-side.
+3. **Auth** — for all dashboard routes except the unauthenticated
+   `POST /auth/validate-access-code`:
+   - Verify Firebase token (§5.2) → `401 unauthorized` on failure.
+   - For everything except `POST /auth/register`, resolve `restaurant_id`
+     (§5.3) → `404 restaurant_not_found` if unbound.
+   - `register` runs with a verified token but **without** a prior binding.
+   - Consumer routes (§12) use their own key-based auth, not Firebase.
+4. **Route handler** — validates input, runs queries/batches, returns DTO.
+
+Every tenant-scoped query MUST include `restaurant_id = :rid`. Treat a missing
+row under the caller's `restaurant_id` as `404 *_not_found` — never leak the
+existence of another tenant's row.
+
+---
+
+## 9. Shared DTO types
+
+The wire types are authoritative in `src/api/types.ts`. Mirror them in
+`server/src/dto.ts`. The key shapes (abridged — see that file for the full set):
+
+```ts
+type Status   = 'active' | 'paused';
+type Priority = 'required' | 'high' | 'medium' | 'low';
+type AdLocation = 'homeScreen' | 'diningHallMenu';
+
+interface AnalyticsPoint { date: string; impressions: number; clicks: number; }
+
+interface AdMetrics { impressions: number; clicks: number; series: AnalyticsPoint[]; }
+
+interface Targeting {
+  audienceTags:  { tag: AudienceTag; priority: Priority }[];
+  dietary:       { pref: DietaryPreference; priority: Priority }[];
+  foodInterests: { name: string; priority: Priority }[];
+  exclusions:    Allergy[];
+  behavioral:    { recurringCustomer: boolean; recurringPriority: Priority };
+  time:          { range: { startHour: number; endHour: number } | null; days: DayOfWeek[] };
+}
+
+interface Campaign {
+  id: string; name: string; status: Status;
+  startDate: string; endDate: string;
+  adIds: string[];                 // ordered list of this campaign's ad ids
+  createdAt: string; updatedAt: string;
+}
+
+interface Ad {
+  id: string; campaignId: string;
+  title: string; description: string; redirectUrl: string; iconUrl?: string;
+  status: Status; location: AdLocation;
+  targeting: Targeting; metrics: AdMetrics;     // metrics always server-computed
+  createdAt: string; updatedAt: string;
+}
+
+interface RestaurantProfile {
+  id: string; name?: string; iconUrl?: string; contactEmail?: string;
+  notifications: { weekly: boolean; emailAlerts: boolean };
+  createdAt: string; updatedAt: string;
+}
+
+interface GlobalStats {
+  impressions: number; clicks: number; ctr: number;
+  activeCampaigns: number; activeAds: number;
+  totalCampaigns: number; totalAds: number;
+}
+
+interface CampaignStats {
+  impressions: number; clicks: number; ctr: number;
+  adCount: number; activeAdCount: number;
+}
+```
+
+> **`Campaign.adIds`** is the ordered list of the campaign's ad ids. Derive it
+> from `ads WHERE campaign_id=? ORDER BY updated_at DESC` (newest first, matching
+> the reference adapter, which prepends new ads). **`Ad.metrics`** must always be
+> populated from `ad_events`; a brand-new ad has `{ impressions:0, clicks:0,
+> series:[] }`.
+
+---
+
+## 10. Dashboard endpoint reference
+
+All routes below require a valid Firebase token and a resolved `restaurant_id`
+unless noted. Request/response field names are exactly as in §9 / `types.ts`.
+
+### 10.1 Auth
+
+#### `POST /auth/validate-access-code` — *unauthenticated*
+Read-only preview; does not consume the code.
+
+Request:
+```json
+{ "accessCode": "UPLATE-7Q2F" }
+```
+Response `200`:
+```json
+{ "valid": true, "restaurant": { "id": "r_abc", "name": "Boiler Bowl Co." } }
+```
+If the code is unknown/expired/consumed: `{ "valid": false }` (still `200`).
+Rate-limit aggressively (§15) since it's unauthenticated.
+
+#### `POST /auth/register` — *authenticated, no binding required*
+Consumes the access code and binds the caller's UID. Atomic (§5.4).
+
+Request: `{ "accessCode": "UPLATE-7Q2F" }`
+Response `200`:
+```json
+{ "restaurantId": "r_abc", "restaurant": { /* RestaurantProfile */ } }
+```
+Errors (the client branches on these exact codes/statuses):
+| Status | `error.code` | Cause |
+| --- | --- | --- |
+| 404 | `access_code_not_found` | Code does not exist. |
+| 410 | `access_code_consumed` | Code already used. |
+| 403 | `access_code_forbidden` | Code disabled/expired, or other policy. |
+
+If the UID is already bound, return its restaurant (idempotent success).
+
+#### `GET /auth/session` — *authenticated*
+Resolves the caller's binding.
+Response `200`: `{ "restaurantId": "r_abc", "restaurant": { /* RestaurantProfile */ } }`
+`404 restaurant_not_found` if unbound (client signs out — see §5.3).
+
+### 10.2 Bootstrap
 
 #### `GET /bootstrap`
-
-**Description.** Returns the entire writable working set for the dashboard in
-one call. The client uses this in place of multiple list endpoints on first
-load (and after `RESET`/sign-in). Replaces the current `loadState()` from
-`localStorage`.
-
-This endpoint is what makes the dashboard feel instant. The server runs a
-small set of joined queries in a single transaction:
-
-- one row from `restaurants`,
-- all `campaigns` for the restaurant ordered by `sort_order`,
-- all `ads` plus their targeting child rows,
-- a per-ad 90-day daily series, aggregated on the server from
-  [`ad_events`](#ad_events) (this populates each `Ad.metrics`).
-
-The server returns 90 days of derived series because that is the maximum
-the Analytics page shows. Older points come from `GET /analytics/series`
-with a date range, which re-aggregates from `ad_events`.
-
-**Request.** No body, no query params.
-
-**Response 200.**
-
-```ts
-interface BootstrapResponse {
-  restaurant: RestaurantProfile;
-  campaigns: Campaign[];   // ordered as the user expects them
-  ads: Ad[];               // each ad's `metrics.series` is last 90 days
-  // Echoed-back ordering for the client reducer
-  campaignOrder: string[];
-  serverTime: string;      // RFC 3339, used to align relative timestamps
+The single first-load fetch. Returns the whole writable working set.
+```json
+{
+  "restaurant": { /* RestaurantProfile */ },
+  "campaigns":  [ /* Campaign[], ordered by sort_order asc */ ],
+  "ads":        [ /* Ad[] with full targeting + metrics, every ad */ ],
+  "campaignOrder": ["c_1", "c_2", "..."],
+  "serverTime": "2026-05-29T14:03:00.000Z"
 }
 ```
+`campaignOrder` is the ordered campaign-id list (== `campaigns` order). Each `Ad`
+includes computed `metrics` (impressions, clicks, daily `series`).
 
-**Failure modes.** `401` if unauthenticated.
+### 10.3 Restaurant
+
+#### `GET /restaurant` → `RestaurantProfile`
+
+#### `PATCH /restaurant` → `RestaurantProfile`
+Request (`RestaurantPatch`; omitted = unchanged, `null` = clear):
+```json
+{
+  "name": "Boiler Bowl Co.",
+  "iconUrl": null,
+  "contactEmail": "ops@boilerbowl.com",
+  "notifications": { "weekly": false, "emailAlerts": true }
+}
+```
+`notifications` is a partial merge over the stored object.
+
+### 10.4 Campaigns
+
+| Method & path | Body | Returns |
+| --- | --- | --- |
+| `GET /campaigns?status=` | — | `{ campaigns: CampaignListItem[] }` |
+| `POST /campaigns` | `CampaignInput` | `{ campaign: Campaign }` |
+| `GET /campaigns/:id` | — | `CampaignDetailResponse` |
+| `PATCH /campaigns/:id` | `CampaignPatch` (+`If-Match`) | `{ campaign: Campaign }` |
+| `DELETE /campaigns/:id` | (+`If-Match`) | `{ deletedCampaignId, deletedAdIds }` |
+| `POST /campaigns/:id/duplicate` | `{ nameSuffix? }` | `{ campaign, ads }` |
+| `POST /campaigns/:id/status` | `SetStatusRequest` | `{ campaign: Campaign }` |
+
+- **`CampaignListItem`** = `Campaign` + `stats: CampaignStats` +
+  `impressionsSpark: number[]` (last 30 days of daily impressions for the
+  campaign's ads — see §11.2).
+- **`CampaignInput`**: `{ name, status?, startDate, endDate }`. Default
+  `status='paused'`. New campaigns go to the **front** of the order
+  (`sort_order` lower than all existing) — the reference adapter prepends.
+- **`CampaignDetailResponse`**:
+  ```ts
+  { campaign: Campaign; ads: Ad[]; stats: CampaignStats;
+    series: AnalyticsPoint[];
+    best:  { adId; title; ctr }[];   // top 3 ads by CTR
+    worst: { adId; title; ctr }[]; } // bottom 3 by CTR (reversed)
+  ```
+- **`DELETE`** cascades: remove the campaign, its ads, their targeting children,
+  and their events — all in one `batch()`. Return the deleted ad ids.
+- **`duplicate`** clones the campaign and **all its ads** (with targeting) in one
+  `batch()`; the clone goes to the front of the order; cloned ads start with
+  zero events/metrics. Append `nameSuffix` (default like `" (Copy)"`) to the name.
+- **`SetStatusRequest`** = `{ status?: Status; toggle?: boolean }`. If
+  `toggle`, flip current status; else set to `status`.
+
+### 10.5 Ads
+
+| Method & path | Body | Returns |
+| --- | --- | --- |
+| `GET /ads?status=&q=&campaignId=&limit=&cursor=` | — | `{ ads: AdListItem[], nextCursor }` |
+| `POST /ads` | `AdInput` | `{ ad: Ad }` |
+| `GET /ads/:id` | — | `{ ad: Ad, campaign: { id, name } }` |
+| `PUT /ads/:id` | `UpdateAdRequest` (+`If-Match`) | `{ ad: Ad }` |
+| `PATCH /ads/:id` | `AdPatch` (+`If-Match`) | `{ ad: Ad }` |
+| `DELETE /ads/:id` | (+`If-Match`) | `{ deletedAdId, campaignId }` |
+| `POST /ads/:id/duplicate` | `DuplicateAdRequest` | `{ ad: Ad }` |
+| `POST /ads/:id/status` | `SetStatusRequest` | `{ ad: Ad }` |
+
+- **`AdListItem`** = `Ad` + `campaignName: string`. List is sorted by
+  `updated_at DESC`. Filters: `status`, `campaignId`, and `q` (case-insensitive
+  substring match on `title`). `limit`/`cursor` reserved for pagination — v1 may
+  return everything with `nextCursor: null` (the reference adapter does).
+- **`AdInput`**: `{ campaignId, title, description?, redirectUrl?, iconUrl?,
+  status?, location?, targeting? }`. Default `status='paused'`,
+  `location='homeScreen'`, empty targeting. `campaignId` must belong to the
+  caller's restaurant (`404 campaign_not_found` otherwise). New ad prepends to
+  the campaign's ad list and bumps the campaign's `updated_at`.
+- **`PUT` (`UpdateAdRequest`)** is a full replace of content + targeting:
+  `{ title, description, redirectUrl, iconUrl?, location, status, targeting }`.
+  Rewrite all targeting children in the batch.
+- **`PATCH` (`AdPatch`)** is partial: any of `{ title, description, redirectUrl,
+  iconUrl (null clears), location, status, campaignId }`. **Moving an ad**
+  (`campaignId` changes) must update both the old and new campaign's ad lists /
+  `updated_at` in one batch.
+- **`DuplicateAdRequest`** = `{ targetCampaignId, titleSuffix? }`; clones content
+  + targeting into the target campaign (must be same restaurant); clone starts
+  with zero metrics.
+
+### 10.6 Analytics
+
+| Method & path | Query | Returns |
+| --- | --- | --- |
+| `GET /analytics/overview` | `range=7d\|30d\|90d\|all` | `AnalyticsOverviewResponse` |
+| `GET /analytics/campaign-comparison` | — | `{ rows: [...] }` |
+| `GET /analytics/series` | `from,to,campaignId` | `{ series, from, to }` |
+| `GET /analytics/audience-insights` | — | `AudienceInsightsResponse` |
+| `GET /analytics/ads/:adId/click-signals` | — | `ClickSignalsResponse` |
+
+Exact response shapes and the SQL to produce them are in §11.
 
 ---
 
-### Restaurant profile
+## 11. Analytics computation (SQL)
 
-#### `GET /restaurant`
+All queries are implicitly scoped to the caller's `restaurant_id` (`:rid`). These
+mirror `src/api/local.ts` exactly; when in doubt, that file is the oracle.
 
-**Description.** Returns the authenticated restaurant. Rarely called
-directly because `/bootstrap` already provides this; useful if the Settings
-page is opened with stale data and the client wants to revalidate.
+### 11.1 Per-ad metrics (`AdMetrics`) — used everywhere an `Ad` is returned
 
-**Response 200.** `RestaurantProfile`.
+```sql
+-- totals
+SELECT
+  SUM(CASE WHEN type='impression' THEN 1 ELSE 0 END) AS impressions,
+  SUM(CASE WHEN type='click'      THEN 1 ELSE 0 END) AS clicks
+FROM ad_events WHERE ad_id = :adId;
 
-#### `PATCH /restaurant`
-
-**Description.** Partial update of restaurant profile fields. Send only the
-fields you want to change. Setting `null` clears an optional field.
-
-**Request body.**
-
-```ts
-interface RestaurantPatch {
-  name?: string | null;
-  iconUrl?: string | null;
-  contactEmail?: string | null;
-  notifications?: Partial<RestaurantProfile['notifications']>;
-}
+-- daily series (ascending by date)
+SELECT occurred_date AS date,
+       SUM(CASE WHEN type='impression' THEN 1 ELSE 0 END) AS impressions,
+       SUM(CASE WHEN type='click'      THEN 1 ELSE 0 END) AS clicks
+FROM ad_events
+WHERE ad_id = :adId
+GROUP BY occurred_date
+ORDER BY occurred_date ASC;
 ```
+`metrics = { impressions, clicks, series }`. For bootstrap/list, batch this
+across all ads with `GROUP BY ad_id, occurred_date` and fold in code (avoid N+1).
 
-**Response 200.** Full `RestaurantProfile` (updated row).
+### 11.2 Campaign stats & spark
 
-**Errors.** `422` invalid URL/email; `401`.
+```sql
+-- CampaignStats totals for one campaign
+SELECT
+  COALESCE(SUM(CASE WHEN e.type='impression' THEN 1 ELSE 0 END),0) AS impressions,
+  COALESCE(SUM(CASE WHEN e.type='click'      THEN 1 ELSE 0 END),0) AS clicks
+FROM ads a LEFT JOIN ad_events e ON e.ad_id = a.id
+WHERE a.campaign_id = :cid;
 
----
-
-### Campaigns
-
-#### `GET /campaigns`
-
-**Description.** Returns every campaign for the restaurant **with rolled-up
-stats and ad counts attached** — the Campaigns page needs no follow-up
-queries. Ordered by `sort_order` (newest first, just like the legacy client
-reducer prepended to `campaignOrder`).
-
-**Query params.**
-
-| Name      | Type    | Default | Notes                            |
-|-----------|---------|---------|----------------------------------|
-| `status`  | `'active'\|'paused'` | (all) | Filter by status.        |
-
-**Response 200.**
-
-```ts
-interface CampaignListItem extends Campaign {
-  stats: CampaignStats;
-  // 30-day impressions sparkline pre-aggregated server-side
-  impressionsSpark: number[];
-}
-interface CampaignListResponse {
-  campaigns: CampaignListItem[];
-}
+-- adCount / activeAdCount
+SELECT COUNT(*) AS adCount,
+       SUM(CASE WHEN status='active' THEN 1 ELSE 0 END) AS activeAdCount
+FROM ads WHERE campaign_id = :cid;
 ```
+`ctr = impressions==0 ? 0 : clicks/impressions`.
 
-#### `POST /campaigns`
-
-**Description.** Create a campaign. The new row is prepended (lowest
-`sort_order`).
-
-**Request body.**
-
-```ts
-type CreateCampaignRequest = CampaignInput;
+**`impressionsSpark`** (CampaignListItem): the last 30 entries of the campaign's
+daily impressions series:
+```sql
+SELECT occurred_date AS date,
+       SUM(CASE WHEN e.type='impression' THEN 1 ELSE 0 END) AS impressions
+FROM ads a JOIN ad_events e ON e.ad_id = a.id
+WHERE a.campaign_id = :cid
+GROUP BY occurred_date
+ORDER BY occurred_date ASC;
 ```
+Take `.slice(-30)` and map to `impressions` only → `number[]`.
 
-**Response 201.**
-
-```ts
-interface CreateCampaignResponse { campaign: Campaign }
-```
-
-**Errors.** `422` `endDate < startDate` or empty name.
-
-#### `GET /campaigns/:id`
-
-**Description.** Returns a single campaign together with **all of its ads,
-the campaign rollups, the 90-day aggregate series, and best/worst ad
-breakdowns**. This is the only call CampaignDetail makes — both the Ads tab
-and the Analytics tab render from it.
-
-**Response 200.**
+### 11.3 `GET /analytics/overview`
 
 ```ts
-interface CampaignDetailResponse {
-  campaign: Campaign;
-  ads: Ad[];                          // includes metrics.series (90d)
-  stats: CampaignStats;
-  series: AnalyticsPoint[];           // 90 days aggregated across ads
-  best:  Array<{ adId: string; title: string; ctr: number }>;  // top 3 by CTR
-  worst: Array<{ adId: string; title: string; ctr: number }>;  // bottom 3 by CTR
-}
-```
-
-**Errors.** `404` if not found / not owned.
-
-#### `PATCH /campaigns/:id`
-
-**Description.** Partial update of campaign fields (name, status, dates).
-
-**Request body.**
-
-```ts
-interface CampaignPatch {
-  name?: string;
-  status?: Status;
-  startDate?: string;
-  endDate?: string;
-}
-```
-
-**Headers.** `If-Match: <updatedAt>` (optional but recommended).
-
-**Response 200.** `{ campaign: Campaign }`.
-
-**Errors.** `404`, `409` stale, `422`.
-
-#### `DELETE /campaigns/:id`
-
-**Description.** Hard-deletes a campaign and all of its ads (cascade). Use
-`If-Match` to prevent racing another tab.
-
-**Response 200.**
-
-```ts
-interface DeleteCampaignResponse {
-  deletedCampaignId: string;
-  deletedAdIds: string[];   // so the client reducer can drop the ads in one update
-}
-```
-
-**Errors.** `404`, `409`.
-
-#### `POST /campaigns/:id/duplicate`
-
-**Description.** Atomically clones a campaign and every one of its ads
-(targeting is deep-copied; metrics are reset; status set to `paused`; the
-copy is prepended in `sort_order`). One round-trip; one DB transaction.
-
-**Request body.**
-
-```ts
-interface DuplicateCampaignRequest {
-  nameSuffix?: string;  // defaults to ' (Copy)'
-}
-```
-
-**Response 201.**
-
-```ts
-interface DuplicateCampaignResponse {
-  campaign: Campaign;
-  ads: Ad[];
-}
-```
-
-#### `POST /campaigns/:id/status`
-
-**Description.** Toggles or sets the campaign's status. Convenience for the
-header toggle and the card row toggle.
-
-**Request body.**
-
-```ts
-interface SetStatusRequest { status?: Status; toggle?: boolean }
-// Exactly one of `status` or `toggle: true` must be present.
-```
-
-**Response 200.** `{ campaign: Campaign }`.
-
-#### `POST /campaigns/reorder`
-
-**Description.** Persist a new ordering after a drag-and-drop reshuffle.
-Single round-trip even for N campaigns.
-
-**Request body.**
-
-```ts
-interface ReorderCampaignsRequest { orderedIds: string[] }
-```
-
-**Response 200.** `{ campaignOrder: string[] }` — the canonical order from
-the server.
-
-**Errors.** `422` if `orderedIds` does not exactly match the set of
-campaigns owned by the restaurant.
-
----
-
-### Ads
-
-#### `GET /ads`
-
-**Description.** Ads Library list. Server applies the status filter and the
-title search so big libraries do not ship the full table to the client.
-
-**Query params.**
-
-| Name        | Type                       | Default | Notes |
-|-------------|----------------------------|---------|-------|
-| `status`    | `'active'\|'paused'`       | (all)   |       |
-| `q`         | `string`                   | —       | Trigram match on `title`. |
-| `campaignId`| `string`                   | —       | Scope to one campaign. |
-| `limit`     | `number` (1–200)           | `50`    |       |
-| `cursor`    | `string` (opaque)          | —       | Server-issued; from prior response. |
-
-**Response 200.**
-
-```ts
-interface AdListItem extends Ad {
-  campaignName: string;       // pre-joined for the "show campaign" badge
-}
-interface AdListResponse {
-  ads: AdListItem[];
-  nextCursor: string | null;
-}
-```
-
-#### `POST /ads`
-
-**Description.** Create an ad inside a campaign. Targeting is optional and
-defaults to the empty targeting object.
-
-**Request body.**
-
-```ts
-type CreateAdRequest = AdInput;
-```
-
-**Response 201.**
-
-```ts
-interface CreateAdResponse { ad: Ad }
-```
-
-**Errors.** `404` campaign not found, `422` invalid targeting.
-
-#### `GET /ads/:id`
-
-**Description.** Single ad with full targeting, full 90-day series, and the
-parent campaign name pre-joined for the breadcrumb. AdDetail uses this for
-the non-edit view.
-
-**Response 200.**
-
-```ts
-interface AdDetailResponse {
-  ad: Ad;
-  campaign: { id: string; name: string };
-}
-```
-
-#### `PUT /ads/:id`
-
-**Description.** Full replace of the ad's editable fields **including
-targeting**. The client's Edit view bundles everything into one save, so
-this endpoint replaces the previous two-dispatch flow (`AD_UPDATE` +
-`TARGETING_UPDATE`). One round-trip, one transaction.
-
-**Request body.**
-
-```ts
-interface UpdateAdRequest {
-  title: string;
-  description: string;
-  redirectUrl: string;
-  creativeUrl?: string | null;
-  iconUrl?: string | null;
-  location: AdLocation;
-  status: Status;
-  targeting: Targeting;
-}
-```
-
-**Headers.** `If-Match: <updatedAt>` recommended.
-
-**Response 200.** `{ ad: Ad }` (with refreshed `updatedAt`).
-
-**Errors.** `404`, `409`, `422` (e.g. unknown enum value, `endHour` out of
-range, duplicate `foodInterests.name`).
-
-#### `PATCH /ads/:id`
-
-**Description.** Partial update for cases where the client only needs to
-touch a few fields (e.g. AdCreateDialog's optimistic edits, drag-to-status).
-Distinct from `PUT` because the latter is the full-edit save.
-
-**Request body.**
-
-```ts
-interface AdPatch {
-  title?: string;
-  description?: string;
-  redirectUrl?: string;
-  creativeUrl?: string | null;
-  iconUrl?: string | null;
-  location?: AdLocation;
-  status?: Status;
-  campaignId?: string;     // move ad to another campaign (server validates)
-}
-```
-
-**Response 200.** `{ ad: Ad }`.
-
-#### `DELETE /ads/:id`
-
-**Description.** Hard-deletes an ad and removes it from the parent
-campaign's `adIds` projection.
-
-**Response 200.**
-
-```ts
-interface DeleteAdResponse { deletedAdId: string; campaignId: string }
-```
-
-#### `POST /ads/:id/duplicate`
-
-**Description.** Clones an ad into a target campaign. Targeting deep-copies;
-metrics reset; status forced to `paused`. Replaces the client's
-`cloneAd()` + `AD_DUPLICATE` dispatch with one round-trip.
-
-**Request body.**
-
-```ts
-interface DuplicateAdRequest {
-  targetCampaignId: string;
-  titleSuffix?: string;     // default ' (Copy)' if the target campaign is the same; '' otherwise
-}
-```
-
-**Response 201.** `{ ad: Ad }`.
-
-**Errors.** `404` target campaign missing.
-
-#### `POST /ads/:id/status`
-
-**Description.** Toggle or set ad status. Same shape as the campaign
-counterpart.
-
-**Request body.** `SetStatusRequest`.
-
-**Response 200.** `{ ad: Ad }`.
-
----
-
-### Analytics
-
-These endpoints exist so the analytics screens never run aggregation on the
-client. They are read-only and cache-friendly (`Cache-Control: max-age=60`).
-Every numeric series below is a GROUP BY over [`ad_events`](#ad_events);
-totals are `count(*) FILTER (...)` partitions of the same scan.
-
-#### `GET /analytics/overview`
-
-**Description.** Powers the Dashboard Overview page and the top section of
-the Analytics page. One call returns global rollups, the aggregate impression
-& click series, the top performing ads, and the four most recently updated
-campaigns.
-
-**Query params.**
-
-| Name    | Type                              | Default |
-|---------|-----------------------------------|---------|
-| `range` | `'7d' \| '30d' \| '90d' \| 'all'` | `'30d'` |
-
-**Response 200.**
-
-```ts
-interface AnalyticsOverviewResponse {
+AnalyticsOverviewResponse {
   stats: GlobalStats;
-  series: AnalyticsPoint[];                        // aggregate across all ads
-  topAds: Array<{
-    adId: string;
-    title: string;
-    campaignId: string;
-    impressions: number;
-    clicks: number;
-    ctr: number;
-  }>;
-  recentCampaigns: Array<{
-    id: string;
-    name: string;
-    status: Status;
-    adCount: number;
-    updatedAt: string;
-  }>;
+  series: AnalyticsPoint[];          // daily, sliced to `range`
+  topAds: { adId, title, campaignId, impressions, clicks, ctr }[];  // ≤6
+  recentCampaigns: { id, name, status, adCount, updatedAt }[];      // ≤4
 }
 ```
+- **stats.impressions/clicks/ctr**: totals across all of the restaurant's events.
+- **activeCampaigns / activeAds**: `COUNT WHERE status='active'`.
+- **totalCampaigns / totalAds**: `COUNT(*)`.
+- **series**: restaurant-wide daily series (`GROUP BY occurred_date`), then slice
+  to the **last N days** where `range` → N: `7d`→7, `30d`→30, `90d`→90,
+  `all`→entire series. Default `range='30d'`.
+- **topAds**: per-ad totals where `impressions > 0`, ordered by **CTR desc**,
+  top 6.
+  ```sql
+  SELECT a.id AS adId, a.title, a.campaign_id AS campaignId,
+         SUM(CASE WHEN e.type='impression' THEN 1 ELSE 0 END) AS impressions,
+         SUM(CASE WHEN e.type='click'      THEN 1 ELSE 0 END) AS clicks
+  FROM ads a JOIN ad_events e ON e.ad_id = a.id
+  WHERE a.restaurant_id = :rid
+  GROUP BY a.id
+  HAVING impressions > 0
+  ORDER BY (CAST(clicks AS REAL)/impressions) DESC
+  LIMIT 6;
+  ```
+- **recentCampaigns**: first 4 campaigns in `sort_order`, with `adCount` = number
+  of ads in the campaign.
 
-#### `GET /analytics/campaign-comparison`
+### 11.4 `GET /analytics/campaign-comparison`
 
-**Description.** Table data for the Analytics page "Campaign comparison"
-card. Pre-joined and pre-aggregated.
-
-**Response 200.**
-
+One row per campaign **in campaign order** (`sort_order asc`):
 ```ts
-interface CampaignComparisonResponse {
-  rows: Array<{
-    campaignId: string;
-    name: string;
-    status: Status;
-    impressions: number;
-    clicks: number;
-    ctr: number;
-    adCount: number;
-  }>;
-}
+{ rows: { campaignId, name, status, impressions, clicks, ctr, adCount }[] }
 ```
+Reuse the §11.2 stats per campaign.
 
-#### `GET /analytics/series`
-
-**Description.** Aggregate impressions/clicks series for a custom window.
-Used when the Analytics page picks `'7d'`, `'90d'`, `'all'`, or when the
-client zooms past the 90 days returned by `/bootstrap`. The client can also
-filter by a campaign or a single ad.
-
-**Query params.**
-
-| Name        | Type                              | Default  | Notes |
-|-------------|-----------------------------------|----------|-------|
-| `from`      | `YYYY-MM-DD`                      | —        | Inclusive. Required if `range` not given. |
-| `to`        | `YYYY-MM-DD`                      | today    | Inclusive. |
-| `range`     | `'7d' \| '30d' \| '90d' \| 'all'` | —        | Mutually exclusive with `from`/`to`. |
-| `campaignId`| `string`                          | —        | Restrict to one campaign. |
-| `adId`      | `string`                          | —        | Restrict to one ad. |
-
-**Response 200.**
+### 11.5 `GET /analytics/series`
 
 ```ts
-interface AnalyticsSeriesResponse {
-  series: AnalyticsPoint[];
-  from: string;
-  to: string;
-}
+{ series: AnalyticsPoint[]; from: string; to: string }
 ```
+- Base series = restaurant-wide daily series, or filtered to a single
+  `campaignId` (join ads on campaign) when provided.
+- `from`/`to` default to the first/last date present; then filter
+  `date >= from AND date <= to` (inclusive, string compare on `YYYY-MM-DD`).
 
-#### `GET /analytics/audience-insights`
-
-**Description.** Powers the Audience Insights page. Tag usage, dietary
-preference weights, and the 7×24 time coverage heatmap — all computed in
-SQL. The heatmap is returned as a flat array so the client can index it
-cheaply.
-
-**Response 200.**
+### 11.6 `GET /analytics/audience-insights`
 
 ```ts
-interface AudienceInsightsResponse {
-  tagUsage: Array<{
-    tag: AudienceTag;
-    count: number;        // ads using the tag
-    pct: number;          // share of all targeted-tag occurrences (0..1)
-  }>;
-  dietaryUsage: Array<{
-    pref: DietaryPreference;
-    count: number;
-    avgPriorityScore: number;   // 0..100 (required=100, low=25)
-  }>;
-  heatmap: {
-    // 168 cells, indexed as day*24 + hour. day=0 is Monday.
-    cells: number[];
-    perDayAdCount: number[];    // length 7, Mon..Sun
-    max: number;
-  };
+AudienceInsightsResponse {
+  tagUsage:     { tag, count, pct }[];
+  dietaryUsage: { pref, count, avgPriorityScore }[];
+  engagement:   AudienceEngagement;      // cross-ad "who actually clicks" rollup
+  heatmap:      { cells: number[/*7*24*/], perDayAdCount: number[/*7*/], max };
+  impressionsHeatmap?: { cells: number[/*7*24*/], max, totalImpressions };
 }
-```
 
-#### `GET /analytics/ads/:id/click-signals`
-
-**Description.** Powers the ClickAudienceSignals card on AdDetail. The
-server aggregates the audience snapshots recorded on each click event in
-[`ad_events`](#ad_events) and its three signal child tables. **All
-percentages and counts here are real groupings, not modeled
-distributions** — the earlier design had no event-level data and the
-client filled the gap with a seeded PRNG; that hack is gone.
-
-**Query semantics.**
-
-- `totalClicks` = `count(*)` over `ad_events WHERE ad_id = :id AND event_type = 'click'`.
-- `topAudienceTags[i].pct` = `count(distinct event_id)` in
-  `ad_event_tags` for `tag = $tag` joined to click events on this ad,
-  divided by `totalClicks`. `targeted` is true when the tag appears in
-  this ad's `ad_audience_tags`.
-- `topDietary` and `topFoodInterests` are computed the same way against
-  their respective child tables.
-- `recurringPct` = share of click events whose
-  `ad_events.recurring_customer = TRUE`.
-- `clicksByDay[i]` = share of click events whose `occurred_at` falls on
-  day i (Monday = 0) of the user's reporting timezone.
-- `clicksByHour[i]` = share of click events whose `occurred_at` falls in
-  hour i (0..23) of the same timezone.
-- `peakHour` = `argmax(clicksByHour)`.
-
-The shape returned is unchanged from the previous spec, only the source
-data is now real per-event rows instead of derived heuristics.
-
-**Response 200.**
-
-```ts
-interface ClickSignalsResponse {
+AudienceEngagement {
   totalClicks: number;
-  topAudienceTags: Array<{
-    tag: AudienceTag; label: string; pct: number; targeted: boolean;
-  }>;
-  topDietary: Array<{
-    pref: DietaryPreference; label: string; pct: number; targeted: boolean;
-  }>;
-  topFoodInterests: Array<{
-    name: string; pct: number; targeted: boolean;
-  }>;
-  recurringPct: number;          // 0..1, recurring-customer share
-  clicksByDay: number[];         // length 7, Mon..Sun
-  clicksByHour: number[];        // length 24
-  peakHour: number;              // 0..23
+  topAudienceTags:  { key, label, pct, targeted }[];  // top 5 by pct
+  topDietary:       { key, label, pct, targeted }[];   // top 5
+  topFoodInterests: { key, label, pct, targeted }[];   // top 5 (key = lowercased name)
+  recurringPct: number;
+  contributingAdCount: number;            // # ads with >= 1 click
 }
 ```
 
----
+- **tagUsage**: count of **ads** that target each audience tag; `pct = count /
+  (sum of all tag counts)`.
+  ```sql
+  SELECT tag, COUNT(*) AS count
+  FROM ad_audience_tags t JOIN ads a ON a.id = t.ad_id
+  WHERE a.restaurant_id = :rid
+  GROUP BY tag;
+  ```
+- **dietaryUsage**: count of ads targeting each dietary pref + the **average
+  priority score**, where `required=100, high=75, medium=50, low=25`.
+  ```sql
+  SELECT pref, COUNT(*) AS count,
+         AVG(CASE priority WHEN 'required' THEN 100 WHEN 'high' THEN 75
+                           WHEN 'medium' THEN 50 ELSE 25 END) AS avgPriorityScore
+  FROM ad_dietary d JOIN ads a ON a.id = d.ad_id
+  WHERE a.restaurant_id = :rid
+  GROUP BY pref;
+  ```
+- **engagement** (cross-ad click rollup): the same per-signal math as the
+  click-signals endpoint (§11.7), but over **every** ad's click events for the
+  restaurant at once — so the Audience Insights screen reads it from this single
+  call instead of issuing one `click-signals` request per ad. Operate only on
+  `type='click'` events; `totalClicks` is their count.
+  ```sql
+  -- audience tags (analogous for dietary; food groups on lowercased name)
+  SELECT t.tag, COUNT(*) AS count
+  FROM ad_event_tags t JOIN ad_events e ON e.id = t.event_id
+  WHERE e.restaurant_id = :rid AND e.type='click'
+  GROUP BY t.tag ORDER BY count DESC LIMIT 5;
+  ```
+  Each row's `pct = count / totalClicks` (0 if no clicks); take top 5 by `pct`.
+  `targeted` = whether **any** of the restaurant's ads target that signal
+  (case-insensitive for foods). `label` from `AUDIENCE_LABEL`/`DIETARY_LABEL`,
+  or the original-cased food name (else Title-Case). `recurringPct =
+  recurringClicks / totalClicks`. `contributingAdCount =
+  COUNT(DISTINCT ad_id)` among the click events.
+- **heatmap** (targeting-based, config not events): a `7*24` array indexed
+  `dow*24 + hour`. For each ad, for each targeted day (or **all 7** if no days
+  set), increment every hour in the ad's `[startHour, endHour)` window (no window
+  ⇒ full `0..24`; a wrap window where `end < start` covers `start..24` then
+  `0..end`). `perDayAdCount[d]` = number of ads active on day `d`. `max =
+  max(1, ...cells)`.
+- **impressionsHeatmap** (real events): `7*24` counts of **impression** events by
+  `dow, hour`. Omit the field entirely if there are zero impressions.
+  ```sql
+  SELECT dow, hour, COUNT(*) AS c
+  FROM ad_events
+  WHERE restaurant_id = :rid AND type='impression'
+  GROUP BY dow, hour;
+  ```
+  Fill `cells[dow*24 + hour] = c`; `max = max(1, ...cells)`;
+  `totalImpressions = SUM(c)`. (The reference adapter approximates this from
+  config because it lacks per-impression timestamps; the real backend has them,
+  so use the true aggregation.)
 
-### Reference data
+### 11.7 `GET /analytics/ads/:adId/click-signals`
 
-Static enums and helper labels do not require their own endpoints — the
-client ships them in `src/data/constants.ts`. If product later wants
-restaurant-defined `foodInterests` (autocomplete), an endpoint can be added:
-
-#### `GET /reference/food-interests`  *(future)*
-
-Returns the union of (a) globally suggested foods and (b) names the
-restaurant has used historically.
-
----
-
-### Health
-
-#### `GET /health`
-
-Unauthenticated liveness check. Returns `{ ok: true, version: '...' }`.
-
----
-
-## Page → endpoint map
-
-This is the round-trip budget per screen. **Never exceed it.**
-
-| Page / component             | Endpoint(s) used                                                              | Calls |
-|------------------------------|-------------------------------------------------------------------------------|-------|
-| Sign-in (existing user)      | Firebase SDK `signInWithEmailAndPassword`, then `GET /auth/session`           | 1     |
-| Sign-up (new user)           | `POST /auth/validate-access-code`, then Firebase SDK `createUser…`, then `POST /auth/register` | 2 |
-| App boot (after auth)        | `GET /bootstrap`                                                              | 1     |
-| DashboardOverview            | `GET /analytics/overview?range=30d`                                           | 1     |
-| Campaigns (list)             | `GET /campaigns`                                                              | 1     |
-| CampaignDetail (Ads tab)     | `GET /campaigns/:id`                                                          | 1     |
-| CampaignDetail (Analytics)   | (reuses the same response — `series` + `best`/`worst` already there)          | 0     |
-| AdsLibrary                   | `GET /ads?status=…&q=…`                                                       | 1     |
-| AdDetail (read)              | `GET /ads/:id`                                                                | 1     |
-| AdDetail + ClickAudienceCard | `GET /analytics/ads/:id/click-signals`                                        | 1     |
-| Analytics                    | `GET /analytics/overview` + `GET /analytics/campaign-comparison` + (optional) `GET /analytics/series` | 2–3 |
-| AudienceInsights             | `GET /analytics/audience-insights`                                            | 1     |
-| Settings                     | (none — uses `/bootstrap` cache) + `PATCH /restaurant` on save                | 0     |
-
-Mutation flows are likewise single-call:
-
-| User action                         | Endpoint                                  |
-|-------------------------------------|-------------------------------------------|
-| Create campaign                     | `POST /campaigns`                         |
-| Edit campaign (header form)         | `PATCH /campaigns/:id`                    |
-| Toggle campaign status              | `POST /campaigns/:id/status`              |
-| Duplicate campaign (+ all ads)      | `POST /campaigns/:id/duplicate`           |
-| Delete campaign (+ cascade ads)     | `DELETE /campaigns/:id`                   |
-| Drag-reorder campaigns              | `POST /campaigns/reorder`                 |
-| Create ad                           | `POST /ads`                               |
-| Edit ad + targeting (Save button)   | `PUT /ads/:id`                            |
-| Toggle ad status                    | `POST /ads/:id/status`                    |
-| Move ad to another campaign         | `PATCH /ads/:id` with `{ campaignId }`    |
-| Duplicate ad into target campaign   | `POST /ads/:id/duplicate`                 |
-| Delete ad                           | `DELETE /ads/:id`                         |
-| Update restaurant profile / notifs  | `PATCH /restaurant`                       |
-
----
-
-## Error contract
-
-Every non-2xx response is JSON of this shape:
-
+Operates only on **click** events for the ad.
 ```ts
-interface ApiError {
-  error: {
-    code: string;            // stable machine-readable, e.g. 'campaign_not_found'
-    message: string;         // human-readable, safe to display
-    fieldErrors?: Record<string, string>;  // per-field validation messages
-    requestId: string;       // for log correlation
-  };
+ClickSignalsResponse {
+  totalClicks: number;
+  topAudienceTags: { tag, label, pct, targeted }[];   // top 5 by pct
+  topDietary:      { pref, label, pct, targeted }[];   // top 5
+  topFoodInterests:{ name, pct, targeted }[];          // top 5
+  recurringPct: number;
+  clicksByDay:  number[/*7, normalized, Mon-indexed*/];
+  clicksByHour: number[/*24, normalized*/];
+  peakHour: number;
 }
 ```
-
-Standard codes:
-
-| HTTP | `code`                  | Meaning                                            |
-|------|-------------------------|----------------------------------------------------|
-| 400  | `bad_request`           | Malformed JSON / missing required field.           |
-| 401  | `unauthorized`          | Missing/expired token.                             |
-| 403  | `forbidden`             | Authenticated but resource not owned.              |
-| 404  | `not_found`             | Path/ID does not resolve.                          |
-| 409  | `conflict`              | `If-Match` mismatch; concurrent edit.              |
-| 422  | `validation_failed`     | Field-level validation errors in `fieldErrors`.    |
-| 429  | `rate_limited`          | Standard `Retry-After` header included.            |
-| 500  | `internal`              | Unexpected server failure; log `requestId`.        |
-
-Resource-specific codes (non-exhaustive): `campaign_not_found`,
-`ad_not_found`, `campaign_dates_invalid`, `food_interest_duplicate`,
-`reorder_set_mismatch`, `access_code_not_found`, `access_code_consumed`,
-`already_registered`, `restaurant_not_found`.
-
-### Codes that drive automatic client-side sign-out
-
-The client's `AuthContext` watches for these codes specifically and, when
-returned from an authenticated endpoint, signs the Firebase user out and
-returns to the sign-in screen with the contextual error:
-
-| HTTP | `code`                  | Trigger                                                |
-|------|-------------------------|--------------------------------------------------------|
-| 404  | `restaurant_not_found`  | Returned from `GET /auth/session` (or `GET /bootstrap`) when the verified Firebase UID has no `restaurant_users` row. |
+- `totalClicks = COUNT(*) FROM ad_events WHERE ad_id=:adId AND type='click'`.
+- For each signal, count distinct click events carrying it; `pct = count /
+  totalClicks` (0 if no clicks). Take top 5 by `pct`.
+  ```sql
+  SELECT t.tag, COUNT(*) AS count
+  FROM ad_event_tags t JOIN ad_events e ON e.id = t.event_id
+  WHERE t.ad_id = :adId AND e.type='click'
+  GROUP BY t.tag ORDER BY count DESC LIMIT 5;
+  -- analogous for ad_event_dietary (pref) and ad_event_food_interests (name)
+  ```
+- `label` comes from the constant maps (`AUDIENCE_LABEL`, `DIETARY_LABEL` in
+  `src/data/constants.ts`); for foods use the ad's original-cased targeted name
+  if it matches, else Title-Case the stored lowercase name.
+- `targeted` = whether the ad's own targeting includes that tag/pref/food
+  (case-insensitive for foods).
+- `recurringPct` = `recurringClicks / totalClicks`.
+- **clicksByDay** (length 7, Mon-indexed) and **clicksByHour** (length 24) are
+  each **normalized to sum ≈ 1** (divide each bucket by the total clicks across
+  buckets; if total is 0, all zeros):
+  ```sql
+  SELECT dow,  COUNT(*) c FROM ad_events WHERE ad_id=:adId AND type='click' GROUP BY dow;
+  SELECT hour, COUNT(*) c FROM ad_events WHERE ad_id=:adId AND type='click' GROUP BY hour;
+  ```
+- `peakHour` = index of the max bucket in `clicksByHour` (0 if no clicks).
 
 ---
 
-## Migration notes
+## 12. Consumer-facing endpoints: event ingestion & ad serving
 
-How to wire the existing client to this backend with minimum churn:
+These power the data the dashboard reads. They are used by the **UPlate consumer
+app**, not the dashboard, and authenticate with `EVENT_INGEST_KEY` (an
+`Authorization: Bearer <EVENT_INGEST_KEY>` shared secret) rather than Firebase.
+They are tenant-scoped by the `adId` in the payload (the server derives
+`restaurant_id` from the ad).
 
-1. **Drop in the client.** `src/api/types.ts` (DTO types) and
-   `src/api/client.ts` (`ApiClient` interface) already exist. They expose
-   `bootstrap()`, `campaigns.*`, `ads.*`, `analytics.*`, `restaurant.*` —
-   one method per endpoint above.
-2. **Flip the persistence layer.** `src/store/persistence.ts` currently
-   serializes `AppState` to `localStorage`. Replace `loadState()` with
-   `await api.bootstrap()` and remove `saveState()` — every mutation now
-   round-trips through `api.*` and the reducer applies the server's response.
-3. **Move dispatches to thunks.** The reducer stays as the single source of
-   truth for client cache. Each existing dispatch site (`AD_CREATE`,
-   `CAMPAIGN_DUPLICATE`, etc.) becomes `await api.x(); dispatch(action)` so
-   the optimistic-then-correct dance is local to that handler.
-4. **Replace selectors that aggregate.** `globalAnalytics`,
-   `campaignAnalytics`, `aggregateSeries`, and `topPerformingAds` move
-   server-side. The client retains them only as type-safe accessors over
-   server-supplied numbers (no math).
-5. **Remove `ClickAudienceSignals` PRNG.** The seeded random generation in
-   that component is replaced with `GET /analytics/ads/:id/click-signals`.
-   This endpoint now returns honest counts because the server has
-   per-event audience snapshots in [`ad_events`](#ad_events) — there is
-   no equivalent in the legacy schema. Ingestion of new events is
-   out-of-scope for this dashboard contract; the assumption is that the
-   UPlate consumer app writes one `ad_events` row (plus tag/dietary/food
-   child rows) per impression and per click.
-6. **Reset-to-seed.** The Settings "Reset demo data" button should call a
-   dev-only `POST /admin/reset` (out of scope for this contract); in
-   production it disappears.
+### 12.1 `POST /events` — record impressions & clicks
 
-Estimated migration: one focused phase per resource family (restaurant,
-campaigns, ads, analytics). Each phase is a contained PR; the reducer
-shape does not change.
+Accepts a batch so the app can flush queued events. The server precomputes
+`occurred_date`, `dow`, `hour` (in `APP_TIMEZONE`, §6.4) and writes the event
+plus its signal child rows in one `batch()`.
+
+Request:
+```json
+{
+  "events": [
+    {
+      "id": "evt_optional_client_id",
+      "adId": "a_123",
+      "type": "impression",
+      "occurredAt": "2026-05-29T16:21:05.000Z",
+      "userId": "u_789",
+      "recurringCustomer": true,
+      "tags": ["highProtein", "postWorkout"],
+      "dietary": ["pescatarian"],
+      "foodInterests": ["Quinoa Bowl"]
+    }
+  ]
+}
+```
+Response `202`: `{ "accepted": 1, "rejected": 0 }`.
+Rules:
+- Resolve `restaurant_id` from `ad_id`; reject unknown ads.
+- `type ∈ {impression, click}`; `occurredAt` required ISO; default
+  `recurringCustomer=false`; arrays default empty.
+- Store `foodInterests` lowercased in `ad_event_food_interests` (matches §11.7
+  grouping); keep `tags`/`dietary` as their enum values.
+- Idempotency: accept an optional client-supplied `id` per event and `INSERT OR
+  IGNORE` so retries are safe.
+
+### 12.2 `GET /serve?location=&userId=` — pick ads to show *(optional, app-side)*
+
+Returns the active ads whose targeting matches a user context, ordered by a
+priority score. Optional for v1 if the consumer app does its own matching, but
+documented because targeting only has meaning when something consumes it.
+
+Query: `location=homeScreen|diningHallMenu`, plus the user's signal context
+(tags, dietary, allergies, foodInterests, recurringCustomer, current local
+time). Matching mirrors the priority weights in `src/data/constants.ts`
+(`required=4, high=3, medium=2, low=1`):
+- **Hard filter**: ad `status='active'`; the user must not have any allergy in
+  the ad's `exclusions`; if the ad has a time window/days, the current local
+  time/day must fall inside it; any `required` rule must be satisfied.
+- **Score**: sum the priority weights of all matched rules; higher = served
+  first.
+Response: ordered `Ad[]` (or a trimmed serving DTO) for that location.
+
+---
+
+## 13. Page → endpoint map
+
+| Page (`src/pages/…`) | Endpoint(s) consumed |
+| --- | --- |
+| App shell / first load | `GET /auth/session`, `GET /bootstrap` |
+| `SignIn`, `SignUp` | `POST /auth/validate-access-code`, `POST /auth/register` (+ Firebase client SDK) |
+| `DashboardOverview` | `GET /analytics/overview?range=` |
+| `Analytics` | `GET /analytics/overview`, `GET /analytics/campaign-comparison`, `GET /analytics/series` |
+| `AudienceInsights` | `GET /analytics/audience-insights` |
+| `Campaigns` | `GET /campaigns`, `POST /campaigns`, `POST /campaigns/:id/status`, `POST /campaigns/:id/duplicate`, `DELETE /campaigns/:id` |
+| `CampaignDetail` | `GET /campaigns/:id`, `PATCH /campaigns/:id`, ad mutations |
+| `AdsLibrary` | `GET /ads?status=&q=&campaignId=` |
+| `AdDetail` | `GET /ads/:id`, `PUT /ads/:id`, `PATCH /ads/:id`, `DELETE /ads/:id`, `POST /ads/:id/duplicate`, `POST /ads/:id/status`, `GET /analytics/ads/:id/click-signals` |
+| `AdCreate` | `POST /ads`, `GET /campaigns` (campaign picker) |
+| `Settings` | `GET /restaurant`, `PATCH /restaurant` |
+
+---
+
+## 14. Error contract
+
+Every non-2xx response is JSON (`src/api/types.ts` → `ApiErrorBody` / `ApiError`):
+
+```json
+{
+  "error": {
+    "code": "campaign_not_found",
+    "message": "Campaign c_123 not found",
+    "fieldErrors": { "name": "Name is required" },
+    "requestId": "f1e2d3c4-..."
+  }
+}
+```
+- `code`: stable machine-readable string (the client branches on these).
+- `message`: human-readable; the client may surface it directly.
+- `fieldErrors`: optional per-field validation messages (forms read these).
+- `requestId`: always present; also log it server-side for correlation.
+
+| HTTP | `code` | When |
+| --- | --- | --- |
+| 400 | `bad_request` / `validation_error` | Malformed body / failed validation (use `fieldErrors`). |
+| 401 | `unauthorized` | Missing/invalid/expired Firebase token. |
+| 403 | `forbidden` / `access_code_forbidden` | Authenticated but not allowed. |
+| 404 | `restaurant_not_found` | UID has no binding (client signs out). |
+| 404 | `campaign_not_found` / `ad_not_found` / `access_code_not_found` | Entity missing under this tenant. |
+| 410 | `access_code_consumed` | Access code already used. |
+| 412 | `version_conflict` | `If-Match` version mismatch (§6.5). |
+| 429 | `rate_limited` | Throttled (§15). Include `Retry-After`. |
+| 500 | `internal` | Unexpected; log with `requestId`, don't leak internals. |
+
+---
+
+## 15. Security, rate limiting & abuse
+
+- **Tenant isolation**: never trust an id from the URL/body alone — always
+  `WHERE restaurant_id = :rid`. A cross-tenant id resolves to `404`, not `403`,
+  to avoid confirming existence.
+- **Token freshness**: reject expired tokens; the client refreshes ID tokens
+  automatically (`getIdToken()` returns a fresh one).
+- **Validation**: enum fields (`status`, `priority`, `location`, `tag`, `pref`,
+  `allergy`, `day`) must be checked against the allowed sets from
+  `src/data/constants.ts`. Clamp `time_*_hour` to `0..23`. Reject `redirectUrl`
+  that isn't http(s).
+- **Rate limiting** (KV counters or Cloudflare Rate Limiting rules):
+  - `POST /auth/validate-access-code` and `/auth/register`: strict per-IP limits
+    (these gate account creation and probe access codes).
+  - `POST /events`: per-key/per-IP burst limits; cap batch size (e.g. ≤500).
+- **Ingestion key hygiene**: `EVENT_INGEST_KEY` and `ADMIN_API_KEY` are Wrangler
+  secrets, never in `vars` or client code. Rotate via `wrangler secret put`.
+- **Access codes**: single-use, optional `expires_at`, unguessable. Consuming is
+  atomic (§5.4) so two simultaneous sign-ups can't claim the same code.
+- **CORS**: only echo origins in `ALLOWED_ORIGINS`.
+
+---
+
+## 16. Deployment & local development
+
+### First-time setup
+
+```bash
+npm create cloudflare@latest uplate-dashboard-api   # or: npm i -D wrangler && wrangler init
+cd uplate-dashboard-api
+npm i hono
+
+# Create resources (writes ids you paste into wrangler.toml)
+wrangler d1 create uplate-dashboard
+wrangler kv namespace create CACHE
+
+# Secrets
+wrangler secret put EVENT_INGEST_KEY
+wrangler secret put ADMIN_API_KEY
+```
+
+### Migrations
+
+```bash
+# Apply schema (§7) locally then remotely
+wrangler d1 migrations apply uplate-dashboard --local
+wrangler d1 migrations apply uplate-dashboard --remote
+
+# Ad-hoc query
+wrangler d1 execute uplate-dashboard --command "SELECT COUNT(*) FROM ad_events;"
+```
+
+Put schema in `migrations/0001_init.sql`. For dev data, mirror
+`src/data/mockData.ts` into `migrations/0002_seed_dev.sql` (apply with `--local`
+only) so the dashboard renders the same demo campaigns/ads/events offline.
+
+### Run & deploy
+
+```bash
+wrangler dev          # local Worker at http://localhost:8787
+wrangler deploy       # publish to *.workers.dev or your route
+```
+
+### Wiring the frontend
+
+In the dashboard repo, set `VITE_API_BASE_URL` to the deployed Worker URL (incl.
+any prefix). With it set, `src/api/index.ts` swaps the localStorage adapter for
+`createHttpClient`, and every request carries the Firebase ID token
+automatically. Unset it → the app runs fully offline against `local.ts`.
+
+```bash
+# dashboard repo .env
+VITE_API_BASE_URL=https://uplate-dashboard-api.<acct>.workers.dev
+```
+
+### Custom domain / routes
+
+The dashboard is served from `restaurant.u-plate.com` (see `package.json`
+`deploy`). Put the API on a sibling host (e.g. `api.u-plate.com`) via a Worker
+route or custom domain, and include the dashboard origin in `ALLOWED_ORIGINS`.
+
+---
+
+## 17. Testing strategy
+
+- **Contract tests**: run the same assertions against `createLocalClient()`
+  (`src/api/local.ts`) and the deployed HTTP client. Identical inputs must yield
+  structurally identical outputs — that's the definition of "the backend works."
+- **Unit tests** (Vitest + `@cloudflare/vitest-pool-workers` or Miniflare):
+  - Token verification: valid, expired, wrong `aud`/`iss`, bad signature.
+  - Access-code consume race: two concurrent `register` calls, exactly one wins.
+  - `If-Match`: stale version → `412`.
+  - Cascade deletes: deleting a campaign removes its ads, targeting, events.
+  - Aggregations: seed known events, assert CTR / series / heatmaps / click
+    signals match the `local.ts` math (esp. Mon-indexed `dow`, normalized
+    `clicksByDay`/`clicksByHour`, `peakHour`).
+- **Tenant isolation**: a token for restaurant A must `404` on B's ids.
+- Use a local D1 (`--local`) seeded from `0002_seed_dev.sql` for integration runs.
+
+---
+
+## 18. Implementation checklist
+
+1. [ ] Scaffold Worker + Hono; add `Env` bindings; `wrangler.toml` (§4).
+2. [ ] Write `migrations/0001_init.sql` (§7); apply locally.
+3. [ ] Firebase JWT verification with KV-cached certs (§5.2); auth middleware
+       resolving `restaurant_id` (§5.3).
+4. [ ] CORS, error-boundary, ETag middleware (§6.5, §6.8, §8, §14).
+5. [ ] Auth routes: `validate-access-code`, `register` (atomic consume),
+       `session` (§10.1).
+6. [ ] Repositories with snake↔camel mapping + targeting assemble/replace (§7.1).
+7. [ ] `GET /bootstrap` (§10.2) with batched per-ad metrics (no N+1).
+8. [ ] Restaurant get/patch (§10.3).
+9. [ ] Campaign CRUD + duplicate/status, all composite writes via
+       `batch()` (§10.4).
+10. [ ] Ad CRUD + PUT/PATCH (incl. campaign move) + duplicate/status (§10.5).
+11. [ ] Analytics endpoints with the SQL in §11.
+12. [ ] Event ingestion `POST /events` with dow/hour bucketing (§12.1).
+13. [ ] (Optional) `GET /serve` ad matching (§12.2).
+14. [ ] Rate limiting + input validation against `constants.ts` enums (§15).
+15. [ ] Contract + unit tests against `local.ts` (§17).
+16. [ ] Deploy; set `VITE_API_BASE_URL` in the dashboard; verify end-to-end.
+```

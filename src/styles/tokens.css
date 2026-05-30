@@ -4,8 +4,10 @@
  * Palette: cool-neutral light, OKLCH. Dusty blue accent derived from
  * UPlate's brand pair (alice-blue #dcedff for tints, powder-blue #94b0da
  * for mid). Confident enough to read as identity, not so saturated that
- * it tips into generic SaaS-blue. Personality still lives in the type
- * pairing (Fraunces verdict + Inter UI) and the rhythm, not in the chrome.
+ * it tips into generic SaaS-blue. Personality lives in the type pairing
+ * (Fraunces display + Inter UI) and the rhythm. The chrome stays quiet,
+ * with one deliberate exception: the sidebar masthead wordmark, where the
+ * Fraunces voice carries the auth surface's identity inward.
  */
 
 :root {

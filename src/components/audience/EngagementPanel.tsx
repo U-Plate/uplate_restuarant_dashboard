@@ -1,16 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Check } from 'lucide-react';
 import { formatPercent } from '../../lib/format';
-import {
-  aggregateEngagement,
-  type AggregateEngagement,
-  type EngagementRow,
-} from '../../lib/audience-insight';
+import type { AudienceEngagement, AudienceEngagementRow } from '../../api';
 
 interface EngagementPanelProps {
-  adIds: string[];
-  /** Notifies parent when the engagement aggregate finishes loading so the parent can compute the coverage line. */
-  onLoaded?: (result: AggregateEngagement) => void;
+  /** Cross-ad engagement aggregate from `/analytics/audience-insights`; null while the parent's single fetch is in flight. */
+  engagement: AudienceEngagement | null;
+  /** True when that fetch failed. */
+  error?: boolean;
 }
 
 type Section = 'tags' | 'dietary' | 'food';
@@ -21,32 +18,11 @@ const SECTION_LABEL: Record<Section, string> = {
   food: 'Food interests',
 };
 
-export function EngagementPanel({ adIds, onLoaded }: EngagementPanelProps) {
-  const [data, setData] = useState<AggregateEngagement | null>(null);
-  const [error, setError] = useState(false);
+export function EngagementPanel({ engagement, error = false }: EngagementPanelProps) {
   const [section, setSection] = useState<Section>('tags');
+  const data = engagement;
 
-  useEffect(() => {
-    let cancelled = false;
-    setData(null);
-    setError(false);
-    aggregateEngagement(adIds)
-      .then((result) => {
-        if (cancelled) return;
-        setData(result);
-        onLoaded?.(result);
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setError(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adIds.join(',')]);
-
-  const rows: EngagementRow[] =
+  const rows: AudienceEngagementRow[] =
     section === 'tags'
       ? data?.topAudienceTags ?? []
       : section === 'dietary'
@@ -81,7 +57,7 @@ export function EngagementPanel({ adIds, onLoaded }: EngagementPanelProps) {
           </h2>
           <span style={{ fontSize: 'var(--type-meta)', color: 'var(--ink-3)' }}>
             {data
-              ? `${data.totalClicks.toLocaleString()} click${data.totalClicks === 1 ? '' : 's'} across ${data.loadedFor.length} ad${data.loadedFor.length === 1 ? '' : 's'}.`
+              ? `${data.totalClicks.toLocaleString()} click${data.totalClicks === 1 ? '' : 's'} across ${data.contributingAdCount} ad${data.contributingAdCount === 1 ? '' : 's'}.`
               : 'Loading audience signals...'}
           </span>
         </div>
@@ -166,7 +142,7 @@ function SectionTabs({ value, onChange }: { value: Section; onChange: (next: Sec
   );
 }
 
-function Row({ row, isFirst }: { row: EngagementRow; isFirst: boolean }) {
+function Row({ row, isFirst }: { row: AudienceEngagementRow; isFirst: boolean }) {
   return (
     <div
       style={{
