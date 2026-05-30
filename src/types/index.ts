@@ -8,22 +8,25 @@ export type AudienceTag =
   | 'macroFriendly';
 
 export type DietaryPreference =
-  | 'vegetarian'
   | 'vegan'
-  | 'glutenFree'
-  | 'dairyFree'
-  | 'kosher'
+  | 'vegetarian'
+  | 'pescatarian'
   | 'halal'
-  | 'pescatarian';
+  | 'kosher';
 
 export type Allergy =
-  | 'peanuts'
-  | 'treeNuts'
-  | 'shellfish'
-  | 'eggs'
-  | 'soy'
+  | 'gluten'
   | 'dairy'
-  | 'wheat';
+  | 'nuts'
+  | 'shellfish'
+  | 'soy'
+  | 'eggs'
+  | 'peanuts'
+  | 'wheat'
+  | 'fish'
+  | 'treeNuts'
+  | 'coconut'
+  | 'sesame';
 
 export type DayOfWeek = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
 
@@ -108,7 +111,6 @@ export interface Ad {
   title: string;
   description: string;
   redirectUrl: string;
-  creativeUrl?: string;
   iconUrl?: string;
   status: Status;
   location: AdLocation;
@@ -118,13 +120,23 @@ export interface Ad {
   updatedAt: string;
 }
 
+export interface RestaurantNotifications {
+  weekly: boolean;
+  emailAlerts: boolean;
+}
+
 export interface RestaurantProfile {
   name?: string;
   iconUrl?: string;
+  contactEmail?: string;
+  notifications?: RestaurantNotifications;
 }
 
 export interface Campaign {
   id: string;
+  /** Campus this campaign's ads serve to. Inherited from the account (set via the
+   *  access code at registration); the dashboard never sets or edits it. */
+  schoolId: string;
   name: string;
   status: Status;
   startDate: string;

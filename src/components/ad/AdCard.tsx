@@ -1,14 +1,21 @@
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Copy, Pause, Pencil, Play, Send, Trash2 } from 'lucide-react';
-import { Card } from '../ui/Card';
-import { Badge } from '../ui/Badge';
+import {
+  ArrowDownRight,
+  ArrowUpRight,
+  Copy,
+  Pause,
+  Pencil,
+  Play,
+  Send,
+  Trash2,
+} from 'lucide-react';
 import { ActionMenu } from '../ui/ActionMenu';
 import { AdPreview } from './AdPreview';
 import type { Ad } from '../../types';
 import { useApp } from '../../store/AppContext';
-import { adCtr } from '../../store/selectors';
 import { formatNumber, formatPercent } from '../../lib/format';
 import { cloneAd } from '../../lib/clone';
+import { singleAdWindow } from '../../lib/verdict';
 import { AD_LOCATION_LABEL } from '../../data/constants';
 
 interface AdCardProps {
@@ -16,15 +23,24 @@ interface AdCardProps {
   onDeleteRequest: (ad: Ad) => void;
   onDuplicateAcross: (ad: Ad) => void;
   showCampaign?: boolean;
+  isTop?: boolean;
+  isCold?: boolean;
 }
 
-export function AdCard({ ad, onDeleteRequest, onDuplicateAcross, showCampaign }: AdCardProps) {
+export function AdCard({
+  ad,
+  onDeleteRequest,
+  onDuplicateAcross,
+  showCampaign,
+  isTop,
+  isCold,
+}: AdCardProps) {
   const { state, dispatch } = useApp();
   const navigate = useNavigate();
   const location = useLocation();
-  const ctr = adCtr(ad);
   const campaign = state.campaigns[ad.campaignId];
   const isActive = ad.status === 'active';
+  const win = singleAdWindow(state, ad.id);
   const inAdsLibrary = location.pathname === '/ads';
 
   const openAd = () =>
@@ -44,76 +60,94 @@ export function AdCard({ ad, onDeleteRequest, onDuplicateAcross, showCampaign }:
   };
 
   return (
-    <Card padding="var(--s-4)" style={{ height: '100%' }}>
-      <div
-        onClick={openAd}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            openAd();
-          }
-        }}
+    <article
+      onClick={(e) => {
+        if ((e.target as HTMLElement).closest('[data-card-action]')) return;
+        openAd();
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          if ((e.target as HTMLElement).closest('[data-card-action]')) return;
+          e.preventDefault();
+          openAd();
+        }
+      }}
+      tabIndex={0}
+      role="link"
+      aria-label={`Open ${ad.title}`}
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 'var(--s-4)',
+        padding: 'var(--s-4)',
+        background: 'var(--surface-raised)',
+        border: '1px solid var(--hairline)',
+        borderRadius: 'var(--r-lg)',
+        cursor: 'pointer',
+        transition: 'border-color var(--motion-fast) var(--ease-out-quart)',
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.borderColor = 'var(--hairline-strong)';
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.borderColor = 'var(--hairline)';
+      }}
+    >
+      <div>
+        {ad.location === 'diningHallMenu' ? (
+          <DiningHallStage>
+            <AdPreview ad={ad} showLabel={false} />
+          </DiningHallStage>
+        ) : (
+          <AdPreview ad={ad} showLabel={false} />
+        )}
+      </div>
+
+      <header
         style={{
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 'var(--s-3)',
-          cursor: 'pointer',
-          height: '100%',
+          display: 'grid',
+          gridTemplateColumns: 'auto minmax(0, 1fr) auto',
+          alignItems: 'center',
+          gap: 'var(--s-2)',
         }}
       >
-        <div
+        <span
+          aria-hidden
           style={{
-            flex: 1,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            minHeight: 0,
+            width: 8,
+            height: 8,
+            borderRadius: '50%',
+            background: isActive ? 'var(--status-active)' : 'var(--status-paused)',
+            boxShadow: isActive
+              ? '0 0 0 3px var(--status-active-tint)'
+              : '0 0 0 3px var(--status-paused-tint)',
+            display: 'inline-block',
+            marginLeft: 2,
           }}
-        >
-          <div style={{ width: '100%' }}>
-            <AdPreview ad={ad} showLabel={false} />
-          </div>
+        />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+          <span
+            style={{
+              fontFamily: 'var(--font-ui)',
+              fontSize: 'var(--type-body)',
+              fontWeight: 600,
+              color: 'var(--ink)',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              minWidth: 0,
+            }}
+            title={ad.title}
+          >
+            {ad.title}
+          </span>
+          {isTop && <InlineTag tone="top">Top</InlineTag>}
+          {isCold && <InlineTag tone="cold">Cold</InlineTag>}
         </div>
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'flex-start',
-            justifyContent: 'space-between',
-            gap: 'var(--s-2)',
-          }}
-        >
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0, flex: 1 }}>
-            <span
-              style={{
-                fontSize: 14,
-                fontWeight: 700,
-                color: 'var(--text)',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {ad.title}
-            </span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-              <Badge tone={isActive ? 'active' : 'paused'} withDot>
-                {isActive ? 'Active' : 'Paused'}
-              </Badge>
-              <Badge tone="neutral">{AD_LOCATION_LABEL[ad.location]}</Badge>
-              {showCampaign && campaign && (
-                <span style={{ fontSize: 11, color: 'var(--text-soft)' }}>{campaign.name}</span>
-              )}
-            </div>
-          </div>
+        <div data-card-action style={{ display: 'inline-flex' }}>
           <ActionMenu
             items={[
-              {
-                label: 'Open',
-                icon: <Pencil size={14} />,
-                onClick: openAd,
-              },
+              { label: 'Open', icon: <Pencil size={14} />, onClick: openAd },
               ...(inAdsLibrary
                 ? []
                 : [
@@ -124,14 +158,15 @@ export function AdCard({ ad, onDeleteRequest, onDuplicateAcross, showCampaign }:
                     },
                   ]),
               {
-                label: 'Duplicate to…',
+                label: 'Duplicate to another campaign',
                 icon: <Send size={14} />,
                 onClick: () => onDuplicateAcross(ad),
               },
               {
                 label: isActive ? 'Pause' : 'Activate',
                 icon: isActive ? <Pause size={14} /> : <Play size={14} />,
-                onClick: () => dispatch({ type: 'AD_TOGGLE_STATUS', payload: { id: ad.id } }),
+                onClick: () =>
+                  dispatch({ type: 'AD_TOGGLE_STATUS', payload: { id: ad.id } }),
               },
               {
                 label: 'Delete',
@@ -142,64 +177,202 @@ export function AdCard({ ad, onDeleteRequest, onDuplicateAcross, showCampaign }:
             ]}
           />
         </div>
+      </header>
 
-        <p
-          style={{
-            fontSize: 12,
-            color: 'var(--text-soft)',
-            lineHeight: 1.45,
-            display: '-webkit-box',
-            WebkitLineClamp: 2,
-            WebkitBoxOrient: 'vertical',
-            overflow: 'hidden',
-          }}
-        >
-          {ad.description || 'No description yet.'}
-        </p>
+      <p
+        style={{
+          fontSize: 'var(--type-meta)',
+          color: 'var(--ink-3)',
+          fontWeight: 500,
+          margin: 0,
+          display: 'flex',
+          gap: 6,
+          flexWrap: 'wrap',
+          alignItems: 'baseline',
+        }}
+      >
+        {showCampaign && campaign && (
+          <>
+            <span>{campaign.name}</span>
+            <span aria-hidden>·</span>
+          </>
+        )}
+        <span>{AD_LOCATION_LABEL[ad.location]}</span>
+      </p>
 
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(3, 1fr)',
-            gap: 'var(--s-2)',
-            padding: 'var(--s-3)',
-            background: 'var(--surface-2)',
-            borderRadius: 'var(--r-md)',
-          }}
-        >
-          <MiniMetric label="Imp" value={formatNumber(ad.metrics.impressions)} />
-          <MiniMetric label="Clicks" value={formatNumber(ad.metrics.clicks)} />
-          <MiniMetric label="CTR" value={formatPercent(ctr)} />
-        </div>
-      </div>
-    </Card>
+      <MetricLine win={win} />
+    </article>
   );
 }
 
-function MiniMetric({ label, value }: { label: string; value: string }) {
+function MetricLine({
+  win,
+}: {
+  win: ReturnType<typeof singleAdWindow>;
+}) {
+  if (!win) return null;
+  const { clicks7d, ctr7d, impressions7d, ctrDelta } = win;
+
+  if (impressions7d === 0) {
+    return (
+      <p
+        style={{
+          fontSize: 'var(--type-meta)',
+          color: 'var(--ink-3)',
+          fontWeight: 500,
+          margin: 0,
+        }}
+      >
+        Not yet served. Audience signals will appear once it runs.
+      </p>
+    );
+  }
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-      <span
-        style={{
-          fontSize: 9,
-          fontWeight: 600,
-          color: 'var(--text-soft)',
-          letterSpacing: 0.3,
-          textTransform: 'uppercase',
-        }}
-      >
-        {label}
+    <p
+      style={{
+        fontSize: 'var(--type-meta)',
+        color: 'var(--ink-2)',
+        margin: 0,
+        display: 'flex',
+        gap: 8,
+        alignItems: 'baseline',
+        fontWeight: 500,
+      }}
+    >
+      <span>
+        <strong className="num" style={{ color: 'var(--ink)', fontWeight: 600 }}>
+          {formatNumber(clicks7d)}
+        </strong>{' '}
+        clicks
       </span>
-      <span
-        style={{
-          fontSize: 13,
-          fontWeight: 700,
-          color: 'var(--text)',
-          fontVariantNumeric: 'tabular-nums',
-        }}
-      >
-        {value}
+      <span aria-hidden style={{ color: 'var(--ink-3)' }}>·</span>
+      <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 4 }}>
+        <strong className="num" style={{ color: 'var(--ink)', fontWeight: 600 }}>
+          {formatPercent(ctr7d, 2)}
+        </strong>{' '}
+        CTR
+        <DeltaArrow delta={ctrDelta} />
       </span>
+    </p>
+  );
+}
+
+function DeltaArrow({ delta }: { delta: number }) {
+  if (Math.abs(delta) < 0.1) return null;
+  if (delta > 0) {
+    return <ArrowUpRight size={12} strokeWidth={2.5} color="var(--trend-positive)" />;
+  }
+  return <ArrowDownRight size={12} strokeWidth={2.5} color="var(--trend-negative)" />;
+}
+
+/**
+ * Wraps a dining-hall-menu AdPreview in its actual visual context: a stretch
+ * of menu rows above and below the ad pill. Without this the small pill sits
+ * alone in a tall card and leaves dead space; with it, the operator sees how
+ * their ad slots into the menu the way an end user will.
+ */
+function DiningHallStage({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      aria-hidden
+      style={{
+        background: '#0d121e',
+        border: '1px solid rgba(255,255,255,0.06)',
+        borderRadius: 14,
+        padding: 8,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 4,
+        overflow: 'hidden',
+      }}
+    >
+      <MenuRow opacity={0.22} />
+      <div style={{ margin: '2px 0' }}>{children}</div>
+      <MenuRow opacity={0.22} />
     </div>
+  );
+}
+
+function MenuRow({ opacity }: { opacity: number }) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        padding: '4px 4px',
+        opacity,
+      }}
+    >
+      <div
+        style={{
+          width: 22,
+          height: 22,
+          borderRadius: '50%',
+          background: 'rgba(168,185,232,0.18)',
+          flexShrink: 0,
+        }}
+      />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 3, flex: 1, minWidth: 0 }}>
+        <div
+          style={{
+            height: 5,
+            width: '62%',
+            background: 'rgba(255,255,255,0.25)',
+            borderRadius: 999,
+          }}
+        />
+        <div
+          style={{
+            height: 4,
+            width: '38%',
+            background: 'rgba(255,255,255,0.14)',
+            borderRadius: 999,
+          }}
+        />
+      </div>
+      <div
+        style={{
+          height: 5,
+          width: 24,
+          background: 'rgba(255,255,255,0.18)',
+          borderRadius: 999,
+        }}
+      />
+    </div>
+  );
+}
+
+function InlineTag({
+  tone,
+  children,
+}: {
+  tone: 'top' | 'cold';
+  children: React.ReactNode;
+}) {
+  const palette =
+    tone === 'top'
+      ? { bg: 'var(--accent-tint)', fg: 'var(--status-active-on)' }
+      : { bg: 'var(--trend-negative-tint)', fg: 'var(--trend-negative)' };
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        padding: '1px 8px',
+        fontSize: 10,
+        fontWeight: 700,
+        letterSpacing: '0.08em',
+        textTransform: 'uppercase',
+        borderRadius: 'var(--r-pill)',
+        background: palette.bg,
+        color: palette.fg,
+        flexShrink: 0,
+        fontFamily: 'var(--font-ui)',
+      }}
+    >
+      {children}
+    </span>
   );
 }

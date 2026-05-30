@@ -1,5 +1,5 @@
 import { Leaf } from 'lucide-react';
-import { SectionShell } from './SectionShell';
+import { TargetingSection } from './TargetingSection';
 import { Chip } from '../ui/Chip';
 import { PrioritySelector } from '../ui/PrioritySelector';
 import { DIETARY_PREFS } from '../../data/constants';
@@ -8,18 +8,25 @@ import type { DietaryRule } from '../../types';
 interface Props {
   value: DietaryRule[];
   onChange: (next: DietaryRule[]) => void;
+  isOpen: boolean;
+  onToggle: () => void;
 }
 
-export function DietarySection({ value, onChange }: Props) {
+export function DietarySection({ value, onChange, isOpen, onToggle }: Props) {
   const selectedSet = new Set(value.map((v) => v.pref));
+  const summary = summarize(value);
 
   return (
-    <SectionShell
-      icon={<Leaf size={16} />}
-      title="Dietary preferences"
-      hint="Higher priority increases ranking influence for users with this preference."
+    <TargetingSection
+      icon={<Leaf size={14} />}
+      eyebrow="Dietary fit"
+      hint="Preferences that boost ranking for users with that diet."
+      summary={summary}
+      isOpen={isOpen}
+      onToggle={onToggle}
+      isEmpty={value.length === 0}
     >
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+      <div className="uplate-targeting__chips">
         {DIETARY_PREFS.map((pref) => {
           const selected = selectedSet.has(pref.value);
           return (
@@ -41,37 +48,17 @@ export function DietarySection({ value, onChange }: Props) {
       </div>
 
       {value.length > 0 && (
-        <div
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 'var(--s-2)',
-            padding: 'var(--s-3) var(--s-4)',
-            background: 'var(--surface-2)',
-            borderRadius: 'var(--r-md)',
-          }}
-        >
+        <div className="uplate-targeting__rules">
           {value.map((rule) => {
             const meta = DIETARY_PREFS.find((p) => p.value === rule.pref);
             return (
-              <div
-                key={rule.pref}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: 'var(--s-3)',
-                  flexWrap: 'wrap',
-                }}
-              >
-                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>
-                  {meta?.label ?? rule.pref}
-                </span>
+              <div key={rule.pref} className="uplate-targeting__rule">
+                <span className="uplate-targeting__rulename">{meta?.label ?? rule.pref}</span>
                 <PrioritySelector
                   value={rule.priority}
                   onChange={(next) =>
                     onChange(
-                      value.map((v) => (v.pref === rule.pref ? { ...v, priority: next } : v))
+                      value.map((v) => (v.pref === rule.pref ? { ...v, priority: next } : v)),
                     )
                   }
                 />
@@ -80,6 +67,15 @@ export function DietarySection({ value, onChange }: Props) {
           })}
         </div>
       )}
-    </SectionShell>
+    </TargetingSection>
   );
+}
+
+function summarize(value: DietaryRule[]): string {
+  if (value.length === 0) return '';
+  const labels = value
+    .slice(0, 4)
+    .map((r) => DIETARY_PREFS.find((p) => p.value === r.pref)?.label ?? r.pref);
+  const more = value.length - labels.length;
+  return labels.join(', ') + (more > 0 ? `, and ${more} more` : '');
 }

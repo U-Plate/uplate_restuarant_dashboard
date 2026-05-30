@@ -32,8 +32,6 @@ import type {
   DuplicateCampaignResponse,
   RegisterRequest,
   RegisterResponse,
-  ReorderCampaignsRequest,
-  ReorderCampaignsResponse,
   RestaurantPatch,
   RestaurantProfile,
   SetStatusRequest,
@@ -76,7 +74,7 @@ export interface ApiClient {
     remove(id: string, ifMatch?: string): Promise<DeleteCampaignResponse>;
     duplicate(id: string, input?: DuplicateCampaignRequest): Promise<DuplicateCampaignResponse>;
     setStatus(id: string, input: SetStatusRequest): Promise<CreateCampaignResponse>;
-    reorder(input: ReorderCampaignsRequest): Promise<ReorderCampaignsResponse>;
+    
   };
 
   ads: {

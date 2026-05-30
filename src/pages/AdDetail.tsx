@@ -1,26 +1,30 @@
+import { useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { Check, Copy, ExternalLink, Pencil, Trash2 } from 'lucide-react';
-import { useMemo, useState } from 'react';
 import type { AdLocation, Targeting } from '../types';
-import { PageHeader } from '../components/layout/PageHeader';
-import { Card } from '../components/ui/Card';
-import { Toggle } from '../components/ui/Toggle';
 import { Button } from '../components/ui/Button';
-import { EmptyState } from '../components/ui/EmptyState';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
-import { DuplicateAdDialog } from '../components/ad/DuplicateAdDialog';
+import { Verdict } from '../components/overview/Verdict';
+import { OverviewChart } from '../components/overview/OverviewChart';
+import { AdPageHeader } from '../components/ad/AdPageHeader';
+import { AdFieldsBlock } from '../components/ad/AdFieldsBlock';
+import { TargetingSummaryList } from '../components/ad/TargetingSummaryList';
+import { StickyBar } from '../components/ui/StickyBar';
 import { AdForm } from '../components/ad/AdForm';
 import { AdPreview } from '../components/ad/AdPreview';
-import { TargetSummaryCard } from '../components/ad/TargetSummaryCard';
-import { ClickAudienceSignals } from '../components/ad/ClickAudienceSignals';
 import { TargetingBuilder } from '../components/targeting/TargetingBuilder';
-import { TrendChart } from '../components/charts/TrendChart';
-import { BarComparison } from '../components/charts/BarComparison';
+import { ClickAudienceSignals } from '../components/ad/ClickAudienceSignals';
+import { DuplicateAdDialog } from '../components/ad/DuplicateAdDialog';
 import { useApp } from '../store/AppContext';
-import { adCtr } from '../store/selectors';
-import { formatNumber, formatPercent } from '../lib/format';
-import { AUDIENCE_LABEL, AD_LOCATION_LABEL } from '../data/constants';
-import { Badge } from '../components/ui/Badge';
+import { computeAdVerdict } from '../lib/verdict';
+
+interface Draft {
+  title: string;
+  description: string;
+  redirectUrl: string;
+  iconUrl?: string;
+  location: AdLocation;
+  targeting: Targeting;
+}
 
 export default function AdDetail() {
   const { id, adId } = useParams();
@@ -28,25 +32,22 @@ export default function AdDetail() {
   const navigate = useNavigate();
   const location = useLocation();
   const [params, setParams] = useSearchParams();
-  const backTo =
-    (location.state as { from?: string } | null)?.from ?? `/campaigns/${id}`;
   const editing = params.get('edit') === '1';
+
+  const [pendingExit, setPendingExit] = useState<null | { kind: 'back' } | { kind: 'navigate'; to: string } | { kind: 'stay' }>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [duplicateOpen, setDuplicateOpen] = useState(false);
-  const [confirmExit, setConfirmExit] = useState(false);
+  const targetingRef = useRef<HTMLDivElement>(null);
 
   const ad = adId ? state.ads[adId] : undefined;
   const campaign = id ? state.campaigns[id] : undefined;
 
-  type Draft = {
-    title: string;
-    description: string;
-    redirectUrl: string;
-    creativeUrl?: string;
-    iconUrl?: string;
-    location: AdLocation;
-    targeting: Targeting;
-  };
+  // Back-link target preserves the upstream surface.
+  const backState = (location.state as { from?: string } | null)?.from;
+  const cameFromLibrary = backState?.startsWith('/ads');
+  const backTo = cameFromLibrary ? '/ads' : `/campaigns/${id}`;
+  const backLabel = cameFromLibrary ? 'Ads' : campaign?.name ?? 'Campaign';
+
   const [draft, setDraft] = useState<Draft | null>(null);
   const [draftKey, setDraftKey] = useState<string | null>(null);
   const expectedKey = editing && ad ? ad.id : null;
@@ -58,7 +59,6 @@ export default function AdDetail() {
             title: ad.title,
             description: ad.description,
             redirectUrl: ad.redirectUrl,
-            creativeUrl: ad.creativeUrl,
             iconUrl: ad.iconUrl,
             location: ad.location,
             targeting: ad.targeting,
@@ -67,24 +67,59 @@ export default function AdDetail() {
     );
   }
 
-  const hasChanges = !!(
-    editing &&
-    draft &&
-    ad &&
-    (draft.title !== ad.title ||
+  const dirty = useMemo(() => {
+    if (!editing || !draft || !ad) return false;
+    return (
+      draft.title !== ad.title ||
       draft.description !== ad.description ||
       draft.redirectUrl !== ad.redirectUrl ||
-      (draft.creativeUrl ?? '') !== (ad.creativeUrl ?? '') ||
       (draft.iconUrl ?? '') !== (ad.iconUrl ?? '') ||
       draft.location !== ad.location ||
-      JSON.stringify(draft.targeting) !== JSON.stringify(ad.targeting))
+      JSON.stringify(draft.targeting) !== JSON.stringify(ad.targeting)
+    );
+  }, [editing, draft, ad]);
+
+  const verdict = useMemo(
+    () => (ad ? computeAdVerdict(state, ad.id) : null),
+    [state, ad],
   );
 
-  const saveDraft = () => {
-    if (!ad || !draft) {
-      setParams({});
+  if (!ad || !campaign) {
+    return <NotFound onBack={() => navigate('/campaigns')} />;
+  }
+
+  const exitEdit = () => {
+    setDraft(null);
+    setDraftKey(null);
+    const next = new URLSearchParams(params);
+    next.delete('edit');
+    setParams(next, { replace: true });
+  };
+
+  const requestExitEdit = (
+    target?: { kind: 'back' } | { kind: 'navigate'; to: string } | { kind: 'stay' },
+  ) => {
+    if (!editing) return;
+    if (!dirty) {
+      exitEdit();
+      if (target?.kind === 'navigate') navigate(target.to);
+      if (target?.kind === 'back') navigate(backTo);
       return;
     }
+    setPendingExit(target ?? { kind: 'stay' });
+  };
+
+  const confirmExit = () => {
+    const target = pendingExit;
+    setPendingExit(null);
+    exitEdit();
+    if (target?.kind === 'navigate') navigate(target.to);
+    if (target?.kind === 'back') navigate(backTo);
+    // 'stay' falls through: exitEdit() already returned us to view mode.
+  };
+
+  const handleSave = () => {
+    if (!draft || !dirty) return;
     dispatch({
       type: 'AD_UPDATE',
       payload: {
@@ -93,342 +128,117 @@ export default function AdDetail() {
           title: draft.title,
           description: draft.description,
           redirectUrl: draft.redirectUrl,
-          creativeUrl: draft.creativeUrl,
           iconUrl: draft.iconUrl,
           location: draft.location,
         },
       },
     });
     dispatch({ type: 'TARGETING_UPDATE', payload: { adId: ad.id, targeting: draft.targeting } });
-    setDraft(null);
-    setParams({});
+    exitEdit();
   };
 
-  const requestBack = () => {
-    if (hasChanges) setConfirmExit(true);
-    else navigate(backTo);
+  const enterEdit = () => {
+    setParams({ edit: '1' });
   };
 
-  const audiencePerf = useMemo(() => {
-    if (!ad) return [];
-    if (ad.targeting.audienceTags.length === 0) return [];
-    return ad.targeting.audienceTags.map((rule, i) => {
-      const fraction = 0.65 - i * 0.08 + (rule.priority === 'required' ? 0.1 : 0);
-      return {
-        name: AUDIENCE_LABEL[rule.tag],
-        value: Math.max(0.18, Math.min(0.92, fraction)),
-      };
+  const enterEditAndScrollToTargeting = () => {
+    setParams({ edit: '1' });
+    // Defer the scroll until after edit mode has rendered.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        targetingRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      });
     });
-  }, [ad]);
-
-  if (!ad || !campaign) {
-    return (
-      <EmptyState
-        title="Ad not found"
-        description="It may have been deleted."
-        action={<Button onClick={() => navigate('/campaigns')}>Back to campaigns</Button>}
-      />
-    );
-  }
-
-  const isActive = ad.status === 'active';
+  };
 
   return (
-    <>
-      <PageHeader
-        title=""
-        meta={
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-            <Badge tone={isActive ? 'active' : 'paused'} withDot>
-              {isActive ? 'Active' : 'Paused'}
-            </Badge>
-            <Badge tone="neutral">{AD_LOCATION_LABEL[ad.location]}</Badge>
-          </div>
+    <div className="uplate-ad-page">
+      <AdPageHeader
+        ad={ad}
+        campaign={campaign}
+        editing={editing}
+        dirty={dirty}
+        backTo={backTo}
+        backLabel={backLabel}
+        onStartEdit={enterEdit}
+        onRequestExitEdit={() => requestExitEdit({ kind: 'back' })}
+        onDiscardChanges={() => requestExitEdit({ kind: 'stay' })}
+        onSave={handleSave}
+        onToggleStatus={() =>
+          dispatch({ type: 'AD_TOGGLE_STATUS', payload: { id: ad.id } })
         }
-        back={backTo}
-        onBack={editing ? requestBack : undefined}
-        actions={
-          editing ? (
-            <Button
-              variant="primary"
-              iconLeft={<Check size={14} />}
-              onClick={saveDraft}
-            >
-              Save
-            </Button>
-          ) : (
-            <>
-              <Toggle
-                checked={isActive}
-                onChange={() => dispatch({ type: 'AD_TOGGLE_STATUS', payload: { id: ad.id } })}
-                label={isActive ? 'Active' : 'Paused'}
-              />
-              
-              <Button
-                variant="ghost"
-                iconLeft={<Copy size={14} />}
-                onClick={() => setDuplicateOpen(true)}
-              >
-                Duplicate
-              </Button>
-              <Button
-                variant="ghost"
-                iconLeft={<Trash2 size={14} />}
-                onClick={() => setConfirmDelete(true)}
-              >
-                Delete
-              </Button>
-              <Button
-                variant="primary"
-                iconLeft={<Pencil size={14} />}
-                onClick={() => setParams({ edit: '1' })}
-              >
-                Edit ad
-              </Button>
-            </>
-          )
-        }
+        onDuplicate={() => setDuplicateOpen(true)}
+        onRequestDelete={() => setConfirmDelete(true)}
       />
 
       {editing ? (
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'minmax(0, 360px) minmax(0, 1fr)',
-            gap: 'var(--s-5)',
-            marginBottom: 'var(--s-5)',
-          }}
-        >
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 'var(--s-4)',
-              position: 'sticky',
-              top: 'var(--s-4)',
-              alignSelf: 'flex-start',
-            }}
-          >
+        <div className="uplate-ad-zone">
+          <div className="uplate-ad-body">
             <AdForm
               value={{
                 title: draft?.title ?? ad.title,
                 description: draft?.description ?? ad.description,
                 redirectUrl: draft?.redirectUrl ?? ad.redirectUrl,
-                creativeUrl: draft?.creativeUrl ?? ad.creativeUrl,
                 iconUrl: draft?.iconUrl ?? ad.iconUrl,
                 location: draft?.location ?? ad.location,
               }}
-              onChange={(patch) =>
-                setDraft((d) => (d ? { ...d, ...patch } : d))
+              onChange={(patch) => setDraft((d) => (d ? { ...d, ...patch } : d))}
+            />
+            <div className="uplate-ad-preview-card">
+              <span className="uplate-ad-zone__eyebrow">
+                Live preview, how it looks on UPlate
+              </span>
+              <AdPreview
+                ad={draft ? { ...ad, ...draft } : ad}
+                showLabel={false}
+              />
+            </div>
+          </div>
+          <div ref={targetingRef}>
+            <TargetingBuilder
+              value={draft?.targeting ?? ad.targeting}
+              onChange={(targeting) =>
+                setDraft((d) => (d ? { ...d, targeting } : d))
               }
             />
-            <Card padding="var(--s-3)">
-              <AdPreview ad={draft ? { ...ad, ...draft } : ad} />
-            </Card>
           </div>
-          <TargetingBuilder
-            value={draft?.targeting ?? ad.targeting}
-            onChange={(targeting) =>
-              setDraft((d) => (d ? { ...d, targeting } : d))
-            }
-          />
         </div>
       ) : (
         <>
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'minmax(0, 360px) minmax(0, 1fr)',
-              gap: 'var(--s-5)',
-              marginBottom: 'var(--s-5)',
-              alignItems: 'flex-start',
-            }}
-          >
-            <Card padding="var(--s-3)">
-              <AdPreview ad={ad} />
-            </Card>
-            <Card padding="var(--s-5)">
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s-4)' }}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  <span
-                    style={{
-                      fontSize: 11,
-                      fontWeight: 700,
-                      color: 'var(--text-soft)',
-                      letterSpacing: 0.3,
-                      textTransform: 'uppercase',
-                    }}
-                  >
-                    Title
-                  </span>
-                  <h2
-                    style={{
-                      fontSize: 24,
-                      fontWeight: 700,
-                      letterSpacing: -0.4,
-                    }}
-                  >
-                    {ad.title}
-                  </h2>
-                </div>
-
-                <DataRow label="Description">
-                  <p style={{ fontSize: 14, color: 'var(--text)', lineHeight: 1.55 }}>
-                    {ad.description || (
-                      <span style={{ color: 'var(--text-soft)', fontStyle: 'italic' }}>
-                        No description yet — click Edit to add one.
-                      </span>
-                    )}
-                  </p>
-                </DataRow>
-
-                <DataRow label="Redirect URL">
-                  {ad.redirectUrl ? (
-                    <a
-                      href={ad.redirectUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 6,
-                        fontSize: 14,
-                        color: 'var(--accent)',
-                        wordBreak: 'break-all',
-                      }}
-                    >
-                      {ad.redirectUrl}
-                      <ExternalLink size={12} />
-                    </a>
-                  ) : (
-                    <span style={{ color: 'var(--text-soft)', fontStyle: 'italic', fontSize: 14 }}>
-                      Not set
-                    </span>
-                  )}
-                </DataRow>
-
-                {/* <DataRow label="Image URL">
-                  {ad.creativeUrl ? (
-                    <a
-                      href={ad.creativeUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: 6,
-                        fontSize: 14,
-                        color: 'var(--accent)',
-                        wordBreak: 'break-all',
-                      }}
-                    >
-                      {ad.creativeUrl}
-                      <ExternalLink size={12} />
-                    </a>
-                  ) : (
-                    <span style={{ color: 'var(--text-soft)', fontStyle: 'italic', fontSize: 14 }}>
-                      Using gradient placeholder
-                    </span>
-                  )}
-                </DataRow> */}
-
-                <DataRow label="Location">
-                  <span style={{ fontSize: 14, color: 'var(--text)', fontWeight: 600 }}>
-                    {AD_LOCATION_LABEL[ad.location]}
-                  </span>
-                </DataRow>
-
-                <DataRow label="Campaign">
-                  <span style={{ fontSize: 14, color: 'var(--text)', fontWeight: 600 }}>
-                    {campaign.name}
-                  </span>
-                </DataRow>
-              </div>
-            </Card>
-          </div>
-
-          <div style={{ marginBottom: 'var(--s-5)' }}>
-            <TargetSummaryCard
-              targeting={ad.targeting}
-              onEdit={() => setParams({ edit: '1' })}
-            />
-          </div>
-
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
-              gap: 'var(--s-4)',
-              marginBottom: 'var(--s-4)',
-            }}
-          >
-            <MiniStat label="Impressions" value={formatNumber(ad.metrics.impressions)} />
-            <MiniStat label="Clicks" value={formatNumber(ad.metrics.clicks)} />
-            <MiniStat label="CTR" value={formatPercent(adCtr(ad))} />
-            <MiniStat
-              label="Audience signals"
-              value={`${
-                ad.targeting.audienceTags.length +
-                ad.targeting.dietary.length +
-                ad.targeting.foodInterests.length
-              }`}
-            />
-          </div>
-
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'minmax(0, 1.3fr) minmax(0, 1fr)',
-              gap: 'var(--s-4)',
-            }}
-          >
-            <Card padding="var(--s-5)">
-              <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 'var(--s-3)' }}>
-                CTR over time
-              </h3>
-              {ad.metrics.series.length === 0 ? (
-                <p style={{ fontSize: 13, color: 'var(--text-soft)' }}>
-                  No performance data yet.
-                </p>
-              ) : (
-                <TrendChart
-                  data={ad.metrics.series.map((s) => ({
-                    date: s.date,
-                    value: s.impressions === 0 ? 0 : (s.clicks / s.impressions) * 100,
-                  }))}
-                  label="CTR %"
-                />
-              )}
-            </Card>
-            <Card padding="var(--s-5)">
-              <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 'var(--s-3)' }}>
-                Audience performance
-              </h3>
-              {audiencePerf.length === 0 ? (
-                <p style={{ fontSize: 13, color: 'var(--text-soft)' }}>
-                  Add audience tags to see breakdown.
-                </p>
-              ) : (
-                <BarComparison
-                  data={audiencePerf}
-                  valueLabel="match score"
-                  formatValue={(n) => formatPercent(n, 0)}
-                  height={200}
-                />
-              )}
-            </Card>
-          </div>
-
-          <div style={{ marginTop: 'var(--s-4)' }}>
+          <section aria-label="Performance" className="uplate-ad-zone">
+            {verdict && <Verdict verdict={verdict} />}
+            <OverviewChart series={ad.metrics.series} />
             <ClickAudienceSignals ad={ad} />
-          </div>
+          </section>
+
+          <section aria-label="Ad spec" className="uplate-ad-zone">
+            <div className="uplate-ad-body">
+              <AdFieldsBlock ad={ad} />
+              <div className="uplate-ad-preview-card">
+                <span className="uplate-ad-zone__eyebrow">
+                  How it looks on UPlate
+                </span>
+                <AdPreview ad={ad} showLabel={false} />
+              </div>
+            </div>
+            <TargetingSummaryList
+              targeting={ad.targeting}
+              onEdit={enterEditAndScrollToTargeting}
+            />
+          </section>
         </>
       )}
 
+      <StickyBar
+        visible={editing && dirty}
+        onSave={handleSave}
+        onDiscard={() => requestExitEdit({ kind: 'stay' })}
+      />
+
       <ConfirmDialog
         open={confirmDelete}
-        title="Delete ad?"
-        message={`Permanently remove "${ad.title}". This can't be undone.`}
+        title="Delete this ad?"
+        message={`Permanently remove "${ad.title}". This cannot be undone.`}
         confirmLabel="Delete"
         onCancel={() => setConfirmDelete(false)}
         onConfirm={() => {
@@ -445,68 +255,47 @@ export default function AdDetail() {
       />
 
       <ConfirmDialog
-        open={confirmExit}
+        open={!!pendingExit}
         title="Discard unsaved changes?"
-        message="Your edits to this ad haven't been saved yet. Leave and discard them?"
+        message="Your edits to this ad haven't been saved. Leave and discard them?"
         confirmLabel="Discard"
         cancelLabel="Keep editing"
-        onCancel={() => setConfirmExit(false)}
-        onConfirm={() => {
-          setConfirmExit(false);
-          setDraft(null);
-          navigate(backTo);
-        }}
+        onCancel={() => setPendingExit(null)}
+        onConfirm={confirmExit}
       />
-    </>
-  );
-}
-
-function DataRow({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-      <span
-        style={{
-          fontSize: 11,
-          fontWeight: 700,
-          color: 'var(--text-soft)',
-          letterSpacing: 0.3,
-          textTransform: 'uppercase',
-        }}
-      >
-        {label}
-      </span>
-      {children}
     </div>
   );
 }
 
-function MiniStat({ label, value }: { label: string; value: string }) {
+function NotFound({ onBack }: { onBack: () => void }) {
   return (
-    <Card padding="var(--s-4)">
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        <span
-          style={{
-            fontSize: 11,
-            fontWeight: 600,
-            color: 'var(--text-soft)',
-            letterSpacing: 0.3,
-            textTransform: 'uppercase',
-          }}
-        >
-          {label}
-        </span>
-        <span
-          style={{
-            fontSize: 20,
-            fontWeight: 700,
-            color: 'var(--text)',
-            fontVariantNumeric: 'tabular-nums',
-            letterSpacing: -0.3,
-          }}
-        >
-          {value}
-        </span>
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 'var(--s-4)',
+        padding: 'var(--s-7) 0',
+        maxWidth: '40ch',
+      }}
+    >
+      <h1
+        style={{
+          fontFamily: 'var(--font-display)',
+          fontSize: 'var(--type-display)',
+          lineHeight: 'var(--type-display-lh)',
+          fontWeight: 500,
+          color: 'var(--ink)',
+          letterSpacing: '-0.022em',
+        }}
+      >
+        That ad isn't here anymore.
+      </h1>
+      <p style={{ fontSize: 'var(--type-body)', color: 'var(--ink-2)' }}>
+        It may have been deleted, or the link is wrong.
+      </p>
+      <div>
+        <Button onClick={onBack}>Back to campaigns</Button>
       </div>
-    </Card>
+    </div>
   );
 }

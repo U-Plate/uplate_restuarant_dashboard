@@ -7,10 +7,20 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..600;1,9..144,400..500&family=Inter:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
     <title>UPlate · Restaurant Dashboard</title>
+    <script>
+      // Set the moss surface before React mounts so unauth'd routes don't
+      // flash cream. Toggled by AuthGate after auth state resolves.
+      (function () {
+        var p = window.location.pathname;
+        if (p === '/sign-in' || p === '/sign-up') {
+          document.documentElement.setAttribute('data-auth', 'true');
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

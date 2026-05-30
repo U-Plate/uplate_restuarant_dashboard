@@ -1,234 +1,173 @@
 import { useMemo, useState } from 'react';
-import { Card } from '../components/ui/Card';
-import { StatCard } from '../components/ui/StatCard';
-import { Tabs } from '../components/ui/Tabs';
-import { DualTrendChart } from '../components/charts/DualTrendChart';
-import { BarComparison } from '../components/charts/BarComparison';
+import { useSearchParams } from 'react-router-dom';
 import { useApp } from '../store/AppContext';
-import {
-  adCtr,
-  adsForCampaign,
-  aggregateSeries,
-  campaignAnalytics,
-  campaignsInOrder,
-  globalAnalytics,
-  topPerformingAds,
-} from '../store/selectors';
-import { formatNumber, formatPercent } from '../lib/format';
-import { Eye, MousePointerClick, Percent, Activity } from 'lucide-react';
-import { Badge } from '../components/ui/Badge';
-import { Link } from 'react-router-dom';
+import { aggregateSeries } from '../store/selectors';
+import { ConfirmDialog } from '../components/ui/ConfirmDialog';
+import { OverviewChart, type RangeKey } from '../components/overview/OverviewChart';
+import { CampaignsTable } from '../components/analytics/CampaignsTable';
+import { TopAdsList } from '../components/analytics/TopAdsList';
+import type { Campaign } from '../types';
 
-type RangeKey = '7d' | '30d' | '90d' | 'all';
+const RANGE_OPTIONS: { value: RangeKey; label: string }[] = [
+  { value: '7d', label: '7d' },
+  { value: '30d', label: '30d' },
+  { value: '90d', label: '90d' },
+  { value: 'all', label: 'All' },
+];
 
 export default function Analytics() {
-  const { state } = useApp();
-  const [range, setRange] = useState<RangeKey>('30d');
-  const stats = globalAnalytics(state);
+  const { state, dispatch } = useApp();
+  const [params, setParams] = useSearchParams();
+  const requestedRange = params.get('range') as RangeKey | null;
+  const range: RangeKey =
+    requestedRange === '7d' ||
+    requestedRange === '30d' ||
+    requestedRange === '90d' ||
+    requestedRange === 'all'
+      ? requestedRange
+      : '30d';
+
+  const setRange = (next: RangeKey) => {
+    const nextParams = new URLSearchParams(params);
+    if (next === '30d') nextParams.delete('range');
+    else nextParams.set('range', next);
+    setParams(nextParams, { replace: true });
+  };
+
   const series = useMemo(() => aggregateSeries(state), [state]);
+  const [pendingDelete, setPendingDelete] = useState<Campaign | null>(null);
 
-  const sliced = useMemo(() => {
-    if (range === 'all') return series;
-    const n = range === '7d' ? 7 : range === '30d' ? 30 : 90;
-    return series.slice(-n);
-  }, [series, range]);
+  const hasCampaigns = Object.keys(state.campaigns).length > 0;
 
-  const top = topPerformingAds(state, 6);
-
-  const campaignRows = useMemo(
-    () =>
-      campaignsInOrder(state).map((c) => {
-        const a = campaignAnalytics(state, c.id);
-        const ads = adsForCampaign(state, c.id);
-        return { campaign: c, ...a, ads: ads.length };
-      }),
-    [state]
-  );
+  if (!hasCampaigns) {
+    return <EmptyState />;
+  }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s-5)' }}>
-      <div
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s-8)' }}>
+      <header
         style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+          display: 'flex',
+          alignItems: 'baseline',
+          justifyContent: 'space-between',
           gap: 'var(--s-4)',
+          flexWrap: 'wrap',
         }}
       >
-        <StatCard
-          label="Impressions"
-          value={formatNumber(stats.impressions)}
-          delta={{ value: 'All time' }}
-          icon={<Eye size={18} />}
-        />
-        <StatCard
-          label="Clicks"
-          value={formatNumber(stats.clicks)}
-          delta={{ value: 'All time' }}
-          icon={<MousePointerClick size={18} />}
-        />
-        <StatCard
-          label="CTR"
-          value={formatPercent(stats.ctr)}
-          delta={{ value: 'Across all ads' }}
-          icon={<Percent size={18} />}
-        />
-        <StatCard
-          label="Active Ads"
-          value={`${stats.activeAds}`}
-          delta={{ value: `${stats.totalAds} total` }}
-          icon={<Activity size={18} />}
-        />
-      </div>
-
-      <Card padding="var(--s-5)">
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            marginBottom: 'var(--s-3)',
-            gap: 'var(--s-3)',
-            flexWrap: 'wrap',
-          }}
-        >
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <h3 style={{ fontSize: 15, fontWeight: 700 }}>Impressions vs clicks</h3>
-            <span style={{ fontSize: 12, color: 'var(--text-soft)' }}>
-              Overlay of total reach and engagement
-            </span>
-          </div>
-          <Tabs
-            value={range}
-            onChange={(v) => setRange(v as RangeKey)}
-            tabs={[
-              { value: '7d', label: '7d' },
-              { value: '30d', label: '30d' },
-              { value: '90d', label: '90d' },
-              { value: 'all', label: 'All' },
-            ]}
-          />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <h1
+            style={{
+              fontFamily: 'var(--font-ui)',
+              fontSize: 'var(--type-headline)',
+              lineHeight: 'var(--type-headline-lh)',
+              fontWeight: 600,
+              color: 'var(--ink)',
+              letterSpacing: '-0.014em',
+              margin: 0,
+            }}
+          >
+            Analytics
+          </h1>
+          <p style={{ fontSize: 'var(--type-meta)', color: 'var(--ink-3)' }}>
+            Performance across your campaigns and ads.
+          </p>
         </div>
-        <DualTrendChart data={sliced} />
-      </Card>
+        <RangePill value={range} onChange={setRange} />
+      </header>
 
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'minmax(0, 1.2fr) minmax(0, 1fr)',
-          gap: 'var(--s-4)',
+      <OverviewChart series={series} range={range} />
+
+      <CampaignsTable range={range} onDeleteRequest={setPendingDelete} />
+
+      <TopAdsList range={range} />
+
+      <ConfirmDialog
+        open={!!pendingDelete}
+        title="Delete campaign?"
+        message={`Delete ${pendingDelete?.name ?? ''}? This removes the campaign and all of its ads. This cannot be undone.`}
+        confirmLabel="Delete"
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={() => {
+          if (pendingDelete) dispatch({ type: 'CAMPAIGN_DELETE', payload: { id: pendingDelete.id } });
+          setPendingDelete(null);
         }}
-      >
-        <Card padding="var(--s-5)">
-          <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 'var(--s-3)' }}>
-            Top performing ads
-          </h3>
-          {top.length === 0 ? (
-            <p style={{ fontSize: 13, color: 'var(--text-soft)' }}>No data yet.</p>
-          ) : (
-            <BarComparison
-              data={top.map((ad) => ({ name: ad.title, value: adCtr(ad) }))}
-              valueLabel="CTR"
-              formatValue={(n) => formatPercent(n)}
-              height={300}
-            />
-          )}
-        </Card>
-
-        <Card padding="var(--s-5)">
-          <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 'var(--s-3)' }}>
-            Campaign comparison
-          </h3>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s-2)' }}>
-            <Row header />
-            {campaignRows.map((row) => (
-              <Link
-                key={row.campaign.id}
-                to={`/campaigns/${row.campaign.id}`}
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: '1.4fr 0.7fr 0.7fr 0.6fr 0.6fr',
-                  alignItems: 'center',
-                  gap: 'var(--s-2)',
-                  padding: '10px 8px',
-                  borderRadius: 'var(--r-md)',
-                  background: 'var(--surface-2)',
-                  color: 'var(--text)',
-                  textDecoration: 'none',
-                  fontSize: 13,
-                }}
-              >
-                <div
-                  style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 2,
-                    minWidth: 0,
-                  }}
-                >
-                  <span
-                    style={{
-                      fontWeight: 600,
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {row.campaign.name}
-                  </span>
-                  <Badge
-                    tone={row.campaign.status === 'active' ? 'active' : 'paused'}
-                    withDot
-                  >
-                    {row.campaign.status === 'active' ? 'Active' : 'Paused'}
-                  </Badge>
-                </div>
-                <span style={{ fontVariantNumeric: 'tabular-nums' }}>
-                  {formatNumber(row.impressions)}
-                </span>
-                <span style={{ fontVariantNumeric: 'tabular-nums' }}>
-                  {formatNumber(row.clicks)}
-                </span>
-                <span style={{ fontVariantNumeric: 'tabular-nums' }}>
-                  {formatPercent(row.ctr)}
-                </span>
-                <span
-                  style={{
-                    fontVariantNumeric: 'tabular-nums',
-                    color: 'var(--text-soft)',
-                  }}
-                >
-                  {row.ads}
-                </span>
-              </Link>
-            ))}
-          </div>
-        </Card>
-      </div>
+      />
     </div>
   );
 }
 
-function Row({ header }: { header?: boolean }) {
-  if (!header) return null;
+function RangePill({ value, onChange }: { value: RangeKey; onChange: (next: RangeKey) => void }) {
+  return (
+    <div
+      role="tablist"
+      aria-label="Time range"
+      style={{
+        display: 'inline-flex',
+        background: 'var(--surface-sunken)',
+        borderRadius: 'var(--r-pill)',
+        padding: 3,
+        gap: 2,
+        border: '1px solid var(--hairline)',
+      }}
+    >
+      {RANGE_OPTIONS.map((opt) => {
+        const active = opt.value === value;
+        return (
+          <button
+            key={opt.value}
+            role="tab"
+            aria-selected={active}
+            type="button"
+            onClick={() => onChange(opt.value)}
+            style={{
+              padding: '6px 14px',
+              border: 'none',
+              background: active ? 'var(--surface)' : 'transparent',
+              color: active ? 'var(--ink)' : 'var(--ink-2)',
+              fontSize: 'var(--type-meta)',
+              fontWeight: active ? 600 : 500,
+              borderRadius: 'var(--r-pill)',
+              cursor: 'pointer',
+              boxShadow: active ? '0 1px 2px oklch(0.22 0.01 250 / 0.06)' : 'none',
+              transition: 'background var(--motion-fast) var(--ease-out-quart)',
+              fontFamily: 'var(--font-ui)',
+              minHeight: 28,
+            }}
+          >
+            {opt.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function EmptyState() {
   return (
     <div
       style={{
-        display: 'grid',
-        gridTemplateColumns: '1.4fr 0.7fr 0.7fr 0.6fr 0.6fr',
-        gap: 'var(--s-2)',
-        padding: '0 8px',
-        fontSize: 10,
-        fontWeight: 700,
-        color: 'var(--text-soft)',
-        letterSpacing: 0.3,
-        textTransform: 'uppercase',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 'var(--s-5)',
+        maxWidth: '52ch',
+        padding: 'var(--s-7) 0',
       }}
     >
-      <span>Campaign</span>
-      <span>Imp</span>
-      <span>Clicks</span>
-      <span>CTR</span>
-      <span>Ads</span>
+      <h1
+        style={{
+          fontFamily: 'var(--font-display)',
+          fontSize: 'var(--type-display)',
+          lineHeight: 'var(--type-display-lh)',
+          fontWeight: 500,
+          color: 'var(--ink)',
+          letterSpacing: '-0.022em',
+        }}
+      >
+        Nothing to measure yet.
+      </h1>
+      <p style={{ fontSize: 'var(--type-body)', color: 'var(--ink-2)', lineHeight: 1.5 }}>
+        Create a campaign with at least one ad. Performance, comparison, and ranking will appear here as your ads serve.
+      </p>
     </div>
   );
 }

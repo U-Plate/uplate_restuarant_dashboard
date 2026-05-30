@@ -15,7 +15,7 @@ import type {
   DuplicateAdRequest,
   DuplicateCampaignRequest,
   RegisterRequest,
-  ReorderCampaignsRequest,
+
   RestaurantPatch,
   SetStatusRequest,
   Status,
@@ -103,8 +103,7 @@ export function createHttpClient(opts: HttpClientOptions): ApiClient {
         request('POST', `/campaigns/${encodeURIComponent(id)}/duplicate`, { body: input ?? {} }),
       setStatus: (id, input: SetStatusRequest) =>
         request('POST', `/campaigns/${encodeURIComponent(id)}/status`, { body: input }),
-      reorder: (input: ReorderCampaignsRequest) =>
-        request('POST', '/campaigns/reorder', { body: input }),
+     
     },
 
     ads: {

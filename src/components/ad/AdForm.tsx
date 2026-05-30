@@ -4,10 +4,10 @@ import type { Ad, AdLocation } from '../../types';
 import { AD_LOCATIONS } from '../../data/constants';
 
 interface AdFormProps {
-  value: Pick<Ad, 'title' | 'description' | 'redirectUrl' | 'creativeUrl' | 'iconUrl' | 'location'>;
+  value: Pick<Ad, 'title' | 'description' | 'redirectUrl' | 'iconUrl' | 'location'>;
   onChange: (
     patch: Partial<
-      Pick<Ad, 'title' | 'description' | 'redirectUrl' | 'creativeUrl' | 'iconUrl' | 'location'>
+      Pick<Ad, 'title' | 'description' | 'redirectUrl' | 'iconUrl' | 'location'>
     >,
   ) => void;
 }
@@ -50,13 +50,6 @@ export function AdForm({ value, onChange }: AdFormProps) {
           onChange={(e) => onChange({ iconUrl: e.target.value || undefined })}
           placeholder="https://…"
         />
-        {/* <TextField
-          label="Image URL"
-          hint="Leave empty to use the gradient placeholder."
-          value={value.creativeUrl ?? ''}
-          onChange={(e) => onChange({ creativeUrl: e.target.value || undefined })}
-          placeholder="https://…"
-        /> */}
       </div>
     </Card>
   );

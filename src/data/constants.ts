@@ -7,6 +7,11 @@ import type {
   DayOfWeek,
 } from '../types';
 
+// School this dashboard's account is scoped to. Schools are owned by the live
+// backend (slugs like 'purdue'); the frontend + mock only reference the id.
+// One school per account: campaigns inherit it, the restaurant never picks it.
+export const DEMO_SCHOOL_ID = 'purdue';
+
 export const AUDIENCE_TAGS: { value: AudienceTag; label: string; hint: string }[] = [
   { value: 'highProtein', label: 'High Protein', hint: 'Users tracking protein intake' },
   { value: 'highCarb', label: 'High Carb', hint: 'Carb-focused fueling' },
@@ -16,23 +21,26 @@ export const AUDIENCE_TAGS: { value: AudienceTag; label: string; hint: string }[
 ];
 
 export const DIETARY_PREFS: { value: DietaryPreference; label: string }[] = [
-  { value: 'vegetarian', label: 'Vegetarian' },
   { value: 'vegan', label: 'Vegan' },
-  { value: 'glutenFree', label: 'Gluten-Free' },
-  { value: 'dairyFree', label: 'Dairy-Free' },
+  { value: 'vegetarian', label: 'Vegetarian' },
   { value: 'pescatarian', label: 'Pescatarian' },
-  { value: 'kosher', label: 'Kosher' },
   { value: 'halal', label: 'Halal' },
+  { value: 'kosher', label: 'Kosher' },
 ];
 
 export const ALLERGIES: { value: Allergy; label: string }[] = [
-  { value: 'peanuts', label: 'Peanuts' },
-  { value: 'treeNuts', label: 'Tree Nuts' },
-  { value: 'shellfish', label: 'Shellfish' },
-  { value: 'eggs', label: 'Eggs' },
-  { value: 'soy', label: 'Soy' },
+  { value: 'gluten', label: 'Gluten' },
   { value: 'dairy', label: 'Dairy' },
+  { value: 'nuts', label: 'Nuts' },
+  { value: 'shellfish', label: 'Shellfish' },
+  { value: 'soy', label: 'Soy' },
+  { value: 'eggs', label: 'Eggs' },
+  { value: 'peanuts', label: 'Peanuts' },
   { value: 'wheat', label: 'Wheat' },
+  { value: 'fish', label: 'Fish' },
+  { value: 'treeNuts', label: 'Tree Nuts' },
+  { value: 'coconut', label: 'Coconut' },
+  { value: 'sesame', label: 'Sesame' },
 ];
 
 export const PRIORITIES: { value: Priority; label: string; weight: number }[] = [
@@ -101,13 +109,11 @@ export const AUDIENCE_LABEL: Record<AudienceTag, string> = {
 };
 
 export const DIETARY_LABEL: Record<DietaryPreference, string> = {
-  vegetarian: 'Vegetarian',
   vegan: 'Vegan',
-  glutenFree: 'Gluten-Free',
-  dairyFree: 'Dairy-Free',
+  vegetarian: 'Vegetarian',
   pescatarian: 'Pescatarian',
-  kosher: 'Kosher',
   halal: 'Halal',
+  kosher: 'Kosher',
 };
 
 export const AD_LOCATIONS: { value: AdLocation; label: string; hint: string }[] = [
@@ -129,11 +135,16 @@ export const AD_LOCATION_LABEL: Record<AdLocation, string> = {
 };
 
 export const ALLERGY_LABEL: Record<Allergy, string> = {
-  peanuts: 'Peanuts',
-  treeNuts: 'Tree Nuts',
-  shellfish: 'Shellfish',
-  eggs: 'Eggs',
-  soy: 'Soy',
+  gluten: 'Gluten',
   dairy: 'Dairy',
+  nuts: 'Nuts',
+  shellfish: 'Shellfish',
+  soy: 'Soy',
+  eggs: 'Eggs',
+  peanuts: 'Peanuts',
   wheat: 'Wheat',
+  fish: 'Fish',
+  treeNuts: 'Tree Nuts',
+  coconut: 'Coconut',
+  sesame: 'Sesame',
 };

@@ -41,7 +41,6 @@ export interface RestaurantProfile {
   notifications: {
     weekly: boolean;
     emailAlerts: boolean;
-    smsAlerts: boolean;
   };
   createdAt: string;
   updatedAt: string;
@@ -159,9 +158,6 @@ export interface DeleteCampaignResponse {
 export interface DuplicateCampaignRequest { nameSuffix?: string }
 export interface DuplicateCampaignResponse { campaign: Campaign; ads: Ad[] }
 
-export interface ReorderCampaignsRequest { orderedIds: string[] }
-export interface ReorderCampaignsResponse { campaignOrder: string[] }
-
 // ---------- Ads ----------
 
 export interface AdInput {
@@ -169,7 +165,6 @@ export interface AdInput {
   title: string;
   description?: string;
   redirectUrl?: string;
-  creativeUrl?: string;
   iconUrl?: string;
   status?: Status;
   location?: AdLocation;
@@ -180,7 +175,6 @@ export interface AdPatch {
   title?: string;
   description?: string;
   redirectUrl?: string;
-  creativeUrl?: string | null;
   iconUrl?: string | null;
   location?: AdLocation;
   status?: Status;
@@ -191,7 +185,6 @@ export interface UpdateAdRequest {
   title: string;
   description: string;
   redirectUrl: string;
-  creativeUrl?: string | null;
   iconUrl?: string | null;
   location: AdLocation;
   status: Status;
@@ -272,14 +265,38 @@ export interface CampaignComparisonResponse {
 export interface AnalyticsSeriesQuery {
   from?: string;
   to?: string;
-  range?: AnalyticsRange;
   campaignId?: string;
-  adId?: string;
 }
 export interface AnalyticsSeriesResponse {
   series: AnalyticsPoint[];
   from: string;
   to: string;
+}
+
+/** One ranked row in the cross-ad engagement aggregate. */
+export interface AudienceEngagementRow {
+  /** Stable identity for the row (tag / pref / lowercased food name). */
+  key: string;
+  label: string;
+  /** Share of total clicks carrying this signal, in [0,1]. */
+  pct: number;
+  /** Whether any of the restaurant's ads target this signal. */
+  targeted: boolean;
+}
+
+/**
+ * Click-engagement aggregated across every ad, precomputed server-side so the
+ * Audience Insights screen reads it from the single `/analytics/audience-insights`
+ * call instead of fanning out one `click-signals` request per ad.
+ */
+export interface AudienceEngagement {
+  totalClicks: number;
+  topAudienceTags: AudienceEngagementRow[];
+  topDietary: AudienceEngagementRow[];
+  topFoodInterests: AudienceEngagementRow[];
+  recurringPct: number;
+  /** Number of ads that received at least one click. */
+  contributingAdCount: number;
 }
 
 export interface AudienceInsightsResponse {
@@ -289,10 +306,22 @@ export interface AudienceInsightsResponse {
     count: number;
     avgPriorityScore: number;
   }>;
+  /** Cross-ad click engagement (who actually clicks), aggregated server-side. */
+  engagement: AudienceEngagement;
   heatmap: {
     cells: number[];
     perDayAdCount: number[];
     max: number;
+  };
+  /**
+   * Optional 7x24 heatmap of real impressions, indexed as `day*24 + hour`.
+   * Not yet returned by the production backend; available from the local
+   * adapter for dev. Front-end falls back to an empty-state when absent.
+   */
+  impressionsHeatmap?: {
+    cells: number[];
+    max: number;
+    totalImpressions: number;
   };
 }
 

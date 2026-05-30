@@ -15,6 +15,7 @@ import type {
   AnalyticsPoint,
   AnalyticsSeriesQuery,
   AnalyticsSeriesResponse,
+  AudienceEngagement,
   AudienceInsightsResponse,
   AuthSessionResponse,
   BootstrapResponse,
@@ -34,8 +35,7 @@ import type {
   DuplicateCampaignResponse,
   RegisterRequest,
   RegisterResponse,
-  ReorderCampaignsRequest,
-  ReorderCampaignsResponse,
+
   RestaurantPatch,
   RestaurantProfile,
   SetStatusRequest,
@@ -48,7 +48,7 @@ import { ApiError } from './types';
 import type { AdEvent, AppState, Targeting } from '../types';
 import { buildSeedState, metricsFromEvents } from '../data/mockData';
 import { cloneAd, cloneCampaign, emptyTargeting, newAdSkeleton, newCampaignSkeleton } from '../lib/clone';
-import { AUDIENCE_LABEL, DIETARY_LABEL } from '../data/constants';
+import { AUDIENCE_LABEL, DIETARY_LABEL, DEMO_SCHOOL_ID } from '../data/constants';
 
 const STORAGE_KEY = 'uplate-dashboard-v2';
 
@@ -177,6 +177,81 @@ function aggregateSeries(state: AppState, campaignId?: string): AnalyticsPoint[]
   return aggregateSeriesFromEvents(eventsForAds(state, adIds));
 }
 
+// Cross-ad click engagement. Mirrors the per-ad click-signals math but folds
+// every ad's click events into one ranked aggregate, so the Audience Insights
+// screen needs a single request instead of one click-signals call per ad.
+function aggregateAdEngagement(state: AppState): AudienceEngagement {
+  const clickEvents = state.events.filter((e) => e.type === 'click');
+  const totalClicks = clickEvents.length;
+
+  // targeted = at least one of the restaurant's ads targets that signal.
+  const targetedTags = new Set<string>();
+  const targetedDiet = new Set<string>();
+  const targetedFood = new Map<string, string>(); // lowercased -> original case
+  for (const ad of Object.values(state.ads)) {
+    for (const r of ad.targeting.audienceTags) targetedTags.add(r.tag);
+    for (const r of ad.targeting.dietary) targetedDiet.add(r.pref);
+    for (const r of ad.targeting.foodInterests) targetedFood.set(r.name.toLowerCase(), r.name);
+  }
+
+  const tagCounts = new Map<string, number>();
+  const dietCounts = new Map<string, number>();
+  const foodCounts = new Map<string, number>();
+  const contributingAds = new Set<string>();
+  let recurringClicks = 0;
+  for (const ev of clickEvents) {
+    contributingAds.add(ev.adId);
+    for (const tag of ev.tags) tagCounts.set(tag, (tagCounts.get(tag) ?? 0) + 1);
+    for (const pref of ev.dietary) dietCounts.set(pref, (dietCounts.get(pref) ?? 0) + 1);
+    for (const name of ev.foodInterests) {
+      const k = name.toLowerCase();
+      foodCounts.set(k, (foodCounts.get(k) ?? 0) + 1);
+    }
+    if (ev.recurringCustomer) recurringClicks += 1;
+  }
+
+  const safeDivide = (n: number) => (totalClicks === 0 ? 0 : n / totalClicks);
+
+  const topAudienceTags = [...tagCounts.entries()]
+    .map(([tag, count]) => ({
+      key: tag,
+      label: AUDIENCE_LABEL[tag as keyof typeof AUDIENCE_LABEL] ?? tag,
+      pct: safeDivide(count),
+      targeted: targetedTags.has(tag),
+    }))
+    .sort((a, b) => b.pct - a.pct)
+    .slice(0, 5);
+
+  const topDietary = [...dietCounts.entries()]
+    .map(([pref, count]) => ({
+      key: pref,
+      label: DIETARY_LABEL[pref as keyof typeof DIETARY_LABEL] ?? pref,
+      pct: safeDivide(count),
+      targeted: targetedDiet.has(pref),
+    }))
+    .sort((a, b) => b.pct - a.pct)
+    .slice(0, 5);
+
+  const topFoodInterests = [...foodCounts.entries()]
+    .map(([key, count]) => ({
+      key,
+      label: targetedFood.get(key) ?? titleCase(key),
+      pct: safeDivide(count),
+      targeted: targetedFood.has(key),
+    }))
+    .sort((a, b) => b.pct - a.pct)
+    .slice(0, 5);
+
+  return {
+    totalClicks,
+    topAudienceTags,
+    topDietary,
+    topFoodInterests,
+    recurringPct: safeDivide(recurringClicks),
+    contributingAdCount: contributingAds.size,
+  };
+}
+
 function toRestaurantProfile(state: AppState): RestaurantProfile {
   const r = state.restaurant ?? {};
   const stored = (r as RestaurantProfile & { contactEmail?: string; notifications?: RestaurantProfile['notifications'] }) ?? {};
@@ -188,7 +263,6 @@ function toRestaurantProfile(state: AppState): RestaurantProfile {
     notifications: stored.notifications ?? {
       weekly: true,
       emailAlerts: true,
-      smsAlerts: false,
     },
     createdAt: nowIso(),
     updatedAt: nowIso(),
@@ -206,6 +280,10 @@ function titleCase(s: string): string {
 // In local mode there is no real access-code list. To exercise the sign-up
 // flow without a backend, treat this exact code as valid; anything else fails.
 const LOCAL_DEMO_ACCESS_CODE = 'UPLATE-DEMO';
+
+// The school this demo account is bound to (one school per account). Real
+// access codes carry a school_id; created campaigns inherit it.
+const LOCAL_DEMO_SCHOOL_ID = DEMO_SCHOOL_ID;
 
 export function createLocalClient(): ApiClient {
   return {
@@ -294,6 +372,8 @@ export function createLocalClient(): ApiClient {
         const c: Campaign = {
           ...newCampaignSkeleton(),
           ...input,
+          // School is inherited from the account, never sent by the client.
+          schoolId: LOCAL_DEMO_SCHOOL_ID,
           status: input.status ?? 'paused',
         };
         const next: AppState = {
@@ -382,18 +462,7 @@ export function createLocalClient(): ApiClient {
         return { campaign: updated };
       },
 
-      reorder: async (input: ReorderCampaignsRequest): Promise<ReorderCampaignsResponse> => {
-        const state = load();
-        const current = new Set(state.campaignOrder);
-        const next = new Set(input.orderedIds);
-        if (current.size !== next.size || [...current].some((id) => !next.has(id))) {
-          throw new ApiError(422, {
-            error: { code: 'reorder_set_mismatch', message: 'orderedIds must match the existing campaign set', requestId: 'local' },
-          });
-        }
-        save({ ...state, campaignOrder: [...input.orderedIds] });
-        return { campaignOrder: [...input.orderedIds] };
-      },
+      
     },
 
     ads: {
@@ -423,7 +492,6 @@ export function createLocalClient(): ApiClient {
           title: input.title,
           description: input.description ?? '',
           redirectUrl: input.redirectUrl ?? '',
-          creativeUrl: input.creativeUrl,
           iconUrl: input.iconUrl,
           status: input.status ?? 'paused',
           location: input.location ?? 'homeScreen',
@@ -455,7 +523,6 @@ export function createLocalClient(): ApiClient {
           title: input.title,
           description: input.description,
           redirectUrl: input.redirectUrl,
-          creativeUrl: input.creativeUrl ?? undefined,
           iconUrl: input.iconUrl ?? undefined,
           location: input.location,
           status: input.status,
@@ -475,7 +542,6 @@ export function createLocalClient(): ApiClient {
         const next: Ad = {
           ...existing,
           ...input,
-          creativeUrl: input.creativeUrl ?? existing.creativeUrl,
           iconUrl: input.iconUrl ?? existing.iconUrl,
           campaignId: input.campaignId ?? existing.campaignId,
           updatedAt: nowIso(),
@@ -693,7 +759,51 @@ export function createLocalClient(): ApiClient {
           }
         }
         const max = Math.max(1, ...cells);
-        return { tagUsage, dietaryUsage, heatmap: { cells, perDayAdCount, max } };
+
+        // Real-impressions heatmap: distribute each ad's lifetime impressions
+        // across the day-hour cells the ad is configured to serve in. This
+        // is a defensible approximation given the local adapter has no
+        // per-event timestamps for impressions. Real backend will replace
+        // this with a true `count(*) GROUP BY dow, hour` aggregation.
+        const impressionsCells = Array.from({ length: 7 * 24 }, () => 0);
+        let totalImpressions = 0;
+        for (const ad of Object.values(state.ads)) {
+          const adImpressions = ad.metrics.impressions;
+          if (adImpressions === 0) continue;
+          totalImpressions += adImpressions;
+          const range = ad.targeting.time.range;
+          const adDays = ad.targeting.time.days.length > 0 ? ad.targeting.time.days : days;
+          const start = range?.startHour ?? 0;
+          const end = range?.endHour ?? 24;
+          const hourSpans: Array<[number, number]> = [];
+          if (end >= start) hourSpans.push([start, end || 24]);
+          else {
+            hourSpans.push([start, 24]);
+            hourSpans.push([0, end]);
+          }
+          const totalCells = adDays.length * hourSpans.reduce((acc, [a, b]) => acc + (b - a), 0);
+          if (totalCells === 0) continue;
+          const perCell = adImpressions / totalCells;
+          for (const d of adDays) {
+            const rIdx = days.indexOf(d);
+            if (rIdx < 0) continue;
+            for (const [a, b] of hourSpans) {
+              for (let h = a; h < b; h++) impressionsCells[rIdx * 24 + h] += perCell;
+            }
+          }
+        }
+        const impressionsMax = Math.max(1, ...impressionsCells);
+
+        return {
+          tagUsage,
+          dietaryUsage,
+          engagement: aggregateAdEngagement(state),
+          heatmap: { cells, perDayAdCount, max },
+          impressionsHeatmap:
+            totalImpressions > 0
+              ? { cells: impressionsCells, max: impressionsMax, totalImpressions }
+              : undefined,
+        };
       },
 
       clickSignals: async (adId): Promise<ClickSignalsResponse> => {
