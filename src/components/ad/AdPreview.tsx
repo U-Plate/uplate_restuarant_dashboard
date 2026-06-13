@@ -3,7 +3,7 @@ import type { Ad, AdLocation } from '../../types';
 import { useApp } from '../../store/AppContext';
 
 interface AdPreviewProps {
-  ad: Pick<Ad, 'title' | 'description' | 'redirectUrl' | 'iconUrl'> & {
+  ad: Pick<Ad, 'title' | 'description' | 'redirectUrl' | 'iconUrl' | 'ctaText'> & {
     location?: AdLocation;
   };
   showLabel?: boolean;
@@ -328,7 +328,7 @@ export function AdPreview({ ad, showLabel = true }: AdPreviewProps) {
                 color: '#ffffff',
               }}
             >
-              Order Now
+              {ad.ctaText?.trim() || 'Order Now'}
             </span>
             <span style={{ width: 4, display: 'inline-block' }} />
             <ArrowRight size={14} color="#ffffff" strokeWidth={2.5} />

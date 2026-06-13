@@ -176,7 +176,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
         settle(async () => {
           dispatch({
             type: 'AD_UPDATE',
-            payload: { id, patch: { ...input, iconUrl: input.iconUrl ?? undefined } },
+            payload: {
+              id,
+              patch: {
+                ...input,
+                iconUrl: input.iconUrl ?? undefined,
+                ctaText: input.ctaText ?? undefined,
+              },
+            },
           });
           const { ad } = await api.ads.update(id, input);
           dispatch({ type: 'AD_UPDATE', payload: { id, patch: ad } });

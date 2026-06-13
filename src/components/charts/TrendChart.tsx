@@ -7,6 +7,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
+import { parseLocalDate } from '../../lib/format';
 
 interface TrendChartProps {
   data: { date: string; value: number }[];
@@ -22,7 +23,7 @@ function formatNumber(n: number): string {
 }
 
 function formatDate(d: string): string {
-  const dt = new Date(d);
+  const dt = parseLocalDate(d);
   return `${dt.getMonth() + 1}/${dt.getDate()}`;
 }
 

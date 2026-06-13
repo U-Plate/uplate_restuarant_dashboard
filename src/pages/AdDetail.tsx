@@ -22,6 +22,7 @@ interface Draft {
   description: string;
   redirectUrl: string;
   iconUrl?: string;
+  ctaText?: string;
   location: AdLocation;
   targeting: Targeting;
 }
@@ -60,6 +61,7 @@ export default function AdDetail() {
             description: ad.description,
             redirectUrl: ad.redirectUrl,
             iconUrl: ad.iconUrl,
+            ctaText: ad.ctaText,
             location: ad.location,
             targeting: ad.targeting,
           }
@@ -74,6 +76,7 @@ export default function AdDetail() {
       draft.description !== ad.description ||
       draft.redirectUrl !== ad.redirectUrl ||
       (draft.iconUrl ?? '') !== (ad.iconUrl ?? '') ||
+      (draft.ctaText ?? '') !== (ad.ctaText ?? '') ||
       draft.location !== ad.location ||
       JSON.stringify(draft.targeting) !== JSON.stringify(ad.targeting)
     );
@@ -125,6 +128,7 @@ export default function AdDetail() {
       description: draft.description,
       redirectUrl: draft.redirectUrl,
       iconUrl: draft.iconUrl ?? null,
+      ctaText: draft.location === 'homeScreen' ? draft.ctaText?.trim() || null : null,
       location: draft.location,
       status: ad.status,
       targeting: draft.targeting,
@@ -173,6 +177,7 @@ export default function AdDetail() {
                 description: draft?.description ?? ad.description,
                 redirectUrl: draft?.redirectUrl ?? ad.redirectUrl,
                 iconUrl: draft?.iconUrl ?? ad.iconUrl,
+                ctaText: draft?.ctaText ?? ad.ctaText,
                 location: draft?.location ?? ad.location,
               }}
               onChange={(patch) => setDraft((d) => (d ? { ...d, ...patch } : d))}

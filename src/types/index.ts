@@ -112,6 +112,8 @@ export interface Ad {
   description: string;
   redirectUrl: string;
   iconUrl?: string;
+  /** CTA button label for home-screen ads. Empty/undefined → app shows "Order Now". */
+  ctaText?: string;
   status: Status;
   location: AdLocation;
   targeting: Targeting;

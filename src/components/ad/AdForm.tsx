@@ -4,10 +4,10 @@ import type { Ad, AdLocation } from '../../types';
 import { AD_LOCATIONS } from '../../data/constants';
 
 interface AdFormProps {
-  value: Pick<Ad, 'title' | 'description' | 'redirectUrl' | 'iconUrl' | 'location'>;
+  value: Pick<Ad, 'title' | 'description' | 'redirectUrl' | 'iconUrl' | 'ctaText' | 'location'>;
   onChange: (
     patch: Partial<
-      Pick<Ad, 'title' | 'description' | 'redirectUrl' | 'iconUrl' | 'location'>
+      Pick<Ad, 'title' | 'description' | 'redirectUrl' | 'iconUrl' | 'ctaText' | 'location'>
     >,
   ) => void;
 }
@@ -43,6 +43,16 @@ export function AdForm({ value, onChange }: AdFormProps) {
           onChange={(e) => onChange({ redirectUrl: e.target.value })}
           placeholder="https://uplate.app/order/your-item"
         />
+        {value.location === 'homeScreen' && (
+          <TextField
+            label="Call to action"
+            hint='The button label shoppers tap. Leave empty to use "Order Now".'
+            value={value.ctaText ?? ''}
+            onChange={(e) => onChange({ ctaText: e.target.value || undefined })}
+            placeholder="Order Now"
+            maxLength={24}
+          />
+        )}
         <TextField
           label="Custom icon URL"
           hint="Leave empty to use the restaurant's default icon."

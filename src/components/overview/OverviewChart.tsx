@@ -10,6 +10,7 @@ import {
   YAxis,
 } from 'recharts';
 import type { AnalyticsPoint } from '../../types';
+import { parseLocalDate } from '../../lib/format';
 
 type MetricKey = 'clicks' | 'impressions' | 'ctr';
 
@@ -280,11 +281,11 @@ function SegmentedControl<T extends string>({ value, onChange, options }: Segmen
 }
 
 function formatTickDate(d: string): string {
-  const dt = new Date(d);
+  const dt = parseLocalDate(d);
   return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
 function formatTooltipDate(d: string): string {
-  const dt = new Date(d);
+  const dt = parseLocalDate(d);
   return dt.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 }

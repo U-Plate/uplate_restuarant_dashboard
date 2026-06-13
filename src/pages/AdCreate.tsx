@@ -16,6 +16,7 @@ interface Draft {
   description: string;
   redirectUrl: string;
   iconUrl?: string;
+  ctaText?: string;
   location: AdLocation;
   targeting: Targeting;
 }
@@ -25,6 +26,7 @@ const INITIAL_DRAFT: Draft = {
   description: '',
   redirectUrl: '',
   iconUrl: undefined,
+  ctaText: undefined,
   location: 'homeScreen',
   targeting: emptyTargeting(),
 };
@@ -49,6 +51,7 @@ export default function AdCreate() {
       draft.description !== INITIAL_DRAFT.description ||
       draft.redirectUrl !== INITIAL_DRAFT.redirectUrl ||
       (draft.iconUrl ?? '') !== '' ||
+      (draft.ctaText ?? '') !== '' ||
       draft.location !== INITIAL_DRAFT.location ||
       JSON.stringify(draft.targeting) !== JSON.stringify(INITIAL_DRAFT.targeting)
     );
@@ -100,6 +103,7 @@ export default function AdCreate() {
         description: draft.description.trim(),
         redirectUrl: draft.redirectUrl.trim(),
         iconUrl: draft.iconUrl?.trim() || undefined,
+        ctaText: draft.location === 'homeScreen' ? draft.ctaText?.trim() || undefined : undefined,
         location: draft.location,
         targeting: draft.targeting,
       });
@@ -153,6 +157,7 @@ export default function AdCreate() {
                 description: draft.description,
                 redirectUrl: draft.redirectUrl,
                 iconUrl: draft.iconUrl,
+                ctaText: draft.ctaText,
                 location: draft.location,
               }}
               onChange={(patch) => setDraft((d) => ({ ...d, ...patch }))}
@@ -167,6 +172,7 @@ export default function AdCreate() {
                   description: draft.description,
                   redirectUrl: draft.redirectUrl,
                   iconUrl: draft.iconUrl,
+                  ctaText: draft.ctaText,
                   location: draft.location,
                 }}
                 showLabel={false}

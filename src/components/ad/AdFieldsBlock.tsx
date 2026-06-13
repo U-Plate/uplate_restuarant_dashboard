@@ -90,6 +90,19 @@ export function AdFieldsBlock({ ad }: AdFieldsBlockProps) {
             {AD_LOCATION_LABEL[ad.location]}
           </span>
         </Field>
+        {ad.location === 'homeScreen' && (
+          <Field label="Call to action">
+            {ad.ctaText?.trim() ? (
+              <span style={{ fontSize: 'var(--type-body)', color: 'var(--ink)' }}>
+                {ad.ctaText}
+              </span>
+            ) : (
+              <span style={{ fontSize: 'var(--type-body)', color: 'var(--ink-3)' }}>
+                Order Now (default)
+              </span>
+            )}
+          </Field>
+        )}
       </dl>
     </section>
   );

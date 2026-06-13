@@ -166,6 +166,7 @@ export interface AdInput {
   description?: string;
   redirectUrl?: string;
   iconUrl?: string;
+  ctaText?: string | null;
   status?: Status;
   location?: AdLocation;
   targeting?: Targeting;
@@ -176,6 +177,7 @@ export interface AdPatch {
   description?: string;
   redirectUrl?: string;
   iconUrl?: string | null;
+  ctaText?: string | null;
   location?: AdLocation;
   status?: Status;
   campaignId?: string;
@@ -186,6 +188,7 @@ export interface UpdateAdRequest {
   description: string;
   redirectUrl: string;
   iconUrl?: string | null;
+  ctaText?: string | null;
   location: AdLocation;
   status: Status;
   targeting: Targeting;

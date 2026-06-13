@@ -8,6 +8,18 @@ export function formatPercent(ratio: number, digits = 2): string {
   return `${(ratio * 100).toFixed(digits)}%`;
 }
 
+/**
+ * Parse a bare `YYYY-MM-DD` string as a LOCAL-midnight Date so the calendar day
+ * is preserved when displayed. `new Date("2026-06-13")` parses as UTC midnight,
+ * which renders as the previous day in any timezone west of UTC — this avoids
+ * that off-by-one. Pass-through for full ISO timestamps (which carry a zone).
+ */
+export function parseLocalDate(d: string): Date {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d);
+  if (!m) return new Date(d);
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+}
+
 export function formatDateRange(start: string, end: string): string {
   const s = new Date(start);
   const e = new Date(end);

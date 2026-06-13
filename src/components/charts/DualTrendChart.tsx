@@ -8,6 +8,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
+import { parseLocalDate } from '../../lib/format';
 
 interface DualTrendChartProps {
   data: { date: string; impressions: number; clicks: number }[];
@@ -21,7 +22,7 @@ function formatNumber(n: number): string {
 }
 
 function formatDate(d: string): string {
-  const dt = new Date(d);
+  const dt = parseLocalDate(d);
   return `${dt.getMonth() + 1}/${dt.getDate()}`;
 }
 
