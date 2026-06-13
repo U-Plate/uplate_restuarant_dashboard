@@ -22,7 +22,7 @@ const SORT_OPTIONS = [
 ];
 
 export default function AdsLibrary() {
-  const { state, dispatch } = useApp();
+  const { state, commands } = useApp();
   const navigate = useNavigate();
   const location = useLocation();
   const [params, setParams] = useSearchParams();
@@ -170,7 +170,7 @@ export default function AdsLibrary() {
         confirmLabel="Delete"
         onCancel={() => setPendingDelete(null)}
         onConfirm={() => {
-          if (pendingDelete) dispatch({ type: 'AD_DELETE', payload: { id: pendingDelete.id } });
+          if (pendingDelete) void commands.deleteAd(pendingDelete.id);
           setPendingDelete(null);
         }}
       />

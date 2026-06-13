@@ -20,7 +20,6 @@ import {
   campaignsInOrder,
 } from '../../store/selectors';
 import { formatNumber, formatPercent } from '../../lib/format';
-import { cloneCampaign } from '../../lib/clone';
 import type { RangeKey } from '../overview/OverviewChart';
 
 type SortKey = 'clicks' | 'ctr';
@@ -48,7 +47,7 @@ interface Row {
 }
 
 export function CampaignsTable({ range, onDeleteRequest }: CampaignsTableProps) {
-  const { state, dispatch } = useApp();
+  const { state, commands } = useApp();
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const sortParam = params.get('campSort') ?? 'clicks-desc';
@@ -98,14 +97,9 @@ export function CampaignsTable({ range, onDeleteRequest }: CampaignsTableProps) 
 
   if (rows.length === 0) return null;
 
-  const handleDuplicate = (c: Campaign) => {
-    const ads = adsForCampaign(state, c.id);
-    const cloned = cloneCampaign(c, ads);
-    dispatch({
-      type: 'CAMPAIGN_DUPLICATE',
-      payload: { id: c.id, newCampaign: cloned.campaign, newAds: cloned.ads },
-    });
-    navigate(`/campaigns/${cloned.campaign.id}`);
+  const handleDuplicate = async (c: Campaign) => {
+    const created = await commands.duplicateCampaign(c.id);
+    navigate(`/campaigns/${created.id}`);
   };
 
   return (
@@ -182,7 +176,7 @@ export function CampaignsTable({ range, onDeleteRequest }: CampaignsTableProps) 
             isTop={row.campaign.id === topId && row.clicks > 0}
             onDuplicate={handleDuplicate}
             onDeleteRequest={onDeleteRequest}
-            dispatch={dispatch}
+            commands={commands}
             navigate={navigate}
           />
         ))}
@@ -228,14 +222,14 @@ function CampaignRow({
   isTop,
   onDuplicate,
   onDeleteRequest,
-  dispatch,
+  commands,
   navigate,
 }: {
   row: Row;
   isTop: boolean;
   onDuplicate: (c: Campaign) => void;
   onDeleteRequest: (c: Campaign) => void;
-  dispatch: ReturnType<typeof useApp>['dispatch'];
+  commands: ReturnType<typeof useApp>['commands'];
   navigate: ReturnType<typeof useNavigate>;
 }) {
   const { campaign, impressions, clicks, ctr, adCount, spark } = row;
@@ -354,7 +348,7 @@ function CampaignRow({
               label: isActive ? 'Pause' : 'Activate',
               icon: isActive ? <Pause size={14} /> : <Play size={14} />,
               onClick: () =>
-                dispatch({ type: 'CAMPAIGN_TOGGLE_STATUS', payload: { id: campaign.id } }),
+                void commands.toggleCampaignStatus(campaign.id),
             },
             { label: 'Duplicate', icon: <Copy size={14} />, onClick: () => onDuplicate(campaign) },
             {

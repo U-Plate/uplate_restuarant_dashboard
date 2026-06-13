@@ -13,6 +13,7 @@ export type Action =
   | { type: 'AD_TOGGLE_STATUS'; payload: { id: string } }
   | { type: 'TARGETING_UPDATE'; payload: { adId: string; targeting: Targeting } }
   | { type: 'RESTAURANT_UPDATE'; payload: Partial<RestaurantProfile> }
+  | { type: 'HYDRATE'; payload: AppState }
   | { type: 'RESET'; payload: AppState };
 
 function nowIso(): string {
@@ -173,6 +174,8 @@ export function reducer(state: AppState, action: Action): AppState {
         restaurant: { ...state.restaurant, ...action.payload },
       };
     }
+    case 'HYDRATE':
+      return action.payload;
     case 'RESET':
       return action.payload;
     default:

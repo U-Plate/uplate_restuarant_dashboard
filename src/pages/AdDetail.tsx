@@ -28,7 +28,7 @@ interface Draft {
 
 export default function AdDetail() {
   const { id, adId } = useParams();
-  const { state, dispatch } = useApp();
+  const { state, commands } = useApp();
   const navigate = useNavigate();
   const location = useLocation();
   const [params, setParams] = useSearchParams();
@@ -120,20 +120,15 @@ export default function AdDetail() {
 
   const handleSave = () => {
     if (!draft || !dirty) return;
-    dispatch({
-      type: 'AD_UPDATE',
-      payload: {
-        id: ad.id,
-        patch: {
-          title: draft.title,
-          description: draft.description,
-          redirectUrl: draft.redirectUrl,
-          iconUrl: draft.iconUrl,
-          location: draft.location,
-        },
-      },
+    void commands.updateAd(ad.id, {
+      title: draft.title,
+      description: draft.description,
+      redirectUrl: draft.redirectUrl,
+      iconUrl: draft.iconUrl ?? null,
+      location: draft.location,
+      status: ad.status,
+      targeting: draft.targeting,
     });
-    dispatch({ type: 'TARGETING_UPDATE', payload: { adId: ad.id, targeting: draft.targeting } });
     exitEdit();
   };
 
@@ -164,9 +159,7 @@ export default function AdDetail() {
         onRequestExitEdit={() => requestExitEdit({ kind: 'back' })}
         onDiscardChanges={() => requestExitEdit({ kind: 'stay' })}
         onSave={handleSave}
-        onToggleStatus={() =>
-          dispatch({ type: 'AD_TOGGLE_STATUS', payload: { id: ad.id } })
-        }
+        onToggleStatus={() => void commands.toggleAdStatus(ad.id)}
         onDuplicate={() => setDuplicateOpen(true)}
         onRequestDelete={() => setConfirmDelete(true)}
       />
@@ -242,7 +235,7 @@ export default function AdDetail() {
         confirmLabel="Delete"
         onCancel={() => setConfirmDelete(false)}
         onConfirm={() => {
-          dispatch({ type: 'AD_DELETE', payload: { id: ad.id } });
+          void commands.deleteAd(ad.id);
           setConfirmDelete(false);
           navigate(`/campaigns/${campaign.id}`);
         }}

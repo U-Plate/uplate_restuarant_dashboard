@@ -16,7 +16,7 @@ const RANGE_OPTIONS: { value: RangeKey; label: string }[] = [
 ];
 
 export default function Analytics() {
-  const { state, dispatch } = useApp();
+  const { state, commands } = useApp();
   const [params, setParams] = useSearchParams();
   const requestedRange = params.get('range') as RangeKey | null;
   const range: RangeKey =
@@ -88,7 +88,7 @@ export default function Analytics() {
         confirmLabel="Delete"
         onCancel={() => setPendingDelete(null)}
         onConfirm={() => {
-          if (pendingDelete) dispatch({ type: 'CAMPAIGN_DELETE', payload: { id: pendingDelete.id } });
+          if (pendingDelete) void commands.deleteCampaign(pendingDelete.id);
           setPendingDelete(null);
         }}
       />

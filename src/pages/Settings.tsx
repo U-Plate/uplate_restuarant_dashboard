@@ -38,7 +38,7 @@ function diffCount(draft: Draft, base: Draft): number {
 }
 
 export default function Settings() {
-  const { state, dispatch, reset } = useApp();
+  const { state, commands, reset } = useApp();
   const { user } = useAuth();
   const baseDraft = useMemo(() => toDraft(state), [state]);
 
@@ -56,17 +56,14 @@ export default function Settings() {
 
   const dirty = diffCount(draft, baseDraft);
 
-  const handleSave = () => {
+  const handleSave = async () => {
     setSaving(true);
     setSaveError(null);
     try {
-      dispatch({
-        type: 'RESTAURANT_UPDATE',
-        payload: {
-          name: draft.name.trim() || undefined,
-          iconUrl: draft.iconUrl.trim() || undefined,
-          notifications: draft.notifications,
-        },
+      await commands.updateRestaurant({
+        name: draft.name.trim() || undefined,
+        iconUrl: draft.iconUrl.trim() || undefined,
+        notifications: draft.notifications,
       });
     } catch {
       setSaveError("Couldn't save. Check your connection and try again.");

@@ -14,7 +14,6 @@ import { AdPreview } from './AdPreview';
 import type { Ad } from '../../types';
 import { useApp } from '../../store/AppContext';
 import { formatNumber, formatPercent } from '../../lib/format';
-import { cloneAd } from '../../lib/clone';
 import { singleAdWindow } from '../../lib/verdict';
 import { AD_LOCATION_LABEL } from '../../data/constants';
 
@@ -35,7 +34,7 @@ export function AdCard({
   isTop,
   isCold,
 }: AdCardProps) {
-  const { state, dispatch } = useApp();
+  const { state, commands } = useApp();
   const navigate = useNavigate();
   const location = useLocation();
   const campaign = state.campaigns[ad.campaignId];
@@ -48,12 +47,8 @@ export function AdCard({
       state: { from: location.pathname + location.search },
     });
 
-  const handleDuplicateHere = () => {
-    const clone = cloneAd(ad, ad.campaignId);
-    dispatch({
-      type: 'AD_DUPLICATE',
-      payload: { sourceId: ad.id, newAd: clone, targetCampaignId: ad.campaignId },
-    });
+  const handleDuplicateHere = async () => {
+    const clone = await commands.duplicateAd(ad.id, ad.campaignId);
     navigate(`/campaigns/${ad.campaignId}/ads/${clone.id}`, {
       state: { from: location.pathname + location.search },
     });
@@ -166,7 +161,7 @@ export function AdCard({
                 label: isActive ? 'Pause' : 'Activate',
                 icon: isActive ? <Pause size={14} /> : <Play size={14} />,
                 onClick: () =>
-                  dispatch({ type: 'AD_TOGGLE_STATUS', payload: { id: ad.id } }),
+                  void commands.toggleAdStatus(ad.id),
               },
               {
                 label: 'Delete',

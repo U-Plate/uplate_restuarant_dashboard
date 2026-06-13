@@ -19,7 +19,6 @@ import { useApp } from '../../store/AppContext';
 import { formatNumber, formatPercent } from '../../lib/format';
 import { describeTargeting } from '../../lib/targeting';
 import { adWindowMetrics, type AdWindowMetrics } from '../../lib/verdict';
-import { cloneAd } from '../../lib/clone';
 import { ActionMenu } from '../ui/ActionMenu';
 import { Sparkline } from '../charts/Sparkline';
 import { AD_LOCATION_LABEL } from '../../data/constants';
@@ -229,7 +228,7 @@ function AdRow({
   onDeleteRequest: (ad: Ad) => void;
   onDuplicateAcross: (ad: Ad) => void;
 }) {
-  const { dispatch } = useApp();
+  const { commands } = useApp();
   const navigate = useNavigate();
   const location = useLocation();
   const { ad, clicks7d, ctr7d, impressions7d, ctrDelta, spark30d } = row;
@@ -242,12 +241,8 @@ function AdRow({
     });
   };
 
-  const handleDuplicateHere = () => {
-    const clone = cloneAd(ad, campaignId);
-    dispatch({
-      type: 'AD_DUPLICATE',
-      payload: { sourceId: ad.id, newAd: clone, targetCampaignId: campaignId },
-    });
+  const handleDuplicateHere = async () => {
+    const clone = await commands.duplicateAd(ad.id, campaignId);
     navigate(`/campaigns/${campaignId}/ads/${clone.id}`, {
       state: { from: location.pathname + location.search },
     });
@@ -448,7 +443,7 @@ function AdRow({
               label: isActive ? 'Pause' : 'Activate',
               icon: isActive ? <Pause size={14} /> : <Play size={14} />,
               onClick: () =>
-                dispatch({ type: 'AD_TOGGLE_STATUS', payload: { id: ad.id } }),
+                void commands.toggleAdStatus(ad.id),
             },
             {
               label: 'Delete',

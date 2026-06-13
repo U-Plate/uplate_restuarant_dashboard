@@ -4,7 +4,6 @@ import { useApp } from '../store/AppContext';
 import {
   aggregateSeries,
   campaignAnalytics,
-  campaignsInOrder,
 } from '../store/selectors';
 import {
   computeCampaignVerdict,
@@ -12,7 +11,6 @@ import {
   deltaFor,
 } from '../lib/verdict';
 import { formatNumber, formatPercent } from '../lib/format';
-import { cloneCampaign } from '../lib/clone';
 import { Button } from '../components/ui/Button';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { Verdict } from '../components/overview/Verdict';
@@ -28,7 +26,7 @@ import type { Ad } from '../types';
 
 export default function CampaignDetail() {
   const { id } = useParams();
-  const { state, dispatch } = useApp();
+  const { state, commands } = useApp();
   const navigate = useNavigate();
   const location = useLocation();
   const [params, setParams] = useSearchParams();
@@ -105,25 +103,17 @@ export default function CampaignDetail() {
   };
 
   const handleSubmitEdit = (patch: { name: string; startDate: string; endDate: string }) => {
-    dispatch({ type: 'CAMPAIGN_UPDATE', payload: { id: campaign.id, patch } });
+    void commands.updateCampaign(campaign.id, patch);
     exitEdit();
   };
 
   const handleToggleStatus = () => {
-    dispatch({ type: 'CAMPAIGN_TOGGLE_STATUS', payload: { id: campaign.id } });
+    void commands.toggleCampaignStatus(campaign.id);
   };
 
-  const handleDuplicate = () => {
-    const ads = campaignsInOrder(state)
-      .find((c) => c.id === campaign.id)
-      ?.adIds.map((adId) => state.ads[adId])
-      .filter((ad): ad is Ad => Boolean(ad)) ?? [];
-    const cloned = cloneCampaign(campaign, ads);
-    dispatch({
-      type: 'CAMPAIGN_DUPLICATE',
-      payload: { id: campaign.id, newCampaign: cloned.campaign, newAds: cloned.ads },
-    });
-    navigate(`/campaigns/${cloned.campaign.id}?edit=1`);
+  const handleDuplicate = async () => {
+    const created = await commands.duplicateCampaign(campaign.id);
+    navigate(`/campaigns/${created.id}?edit=1`);
   };
 
   const adCount = campaign.adIds.length;
@@ -201,7 +191,7 @@ export default function CampaignDetail() {
         confirmLabel="Delete"
         onCancel={() => setPendingAdDelete(null)}
         onConfirm={() => {
-          if (pendingAdDelete) dispatch({ type: 'AD_DELETE', payload: { id: pendingAdDelete.id } });
+          if (pendingAdDelete) void commands.deleteAd(pendingAdDelete.id);
           setPendingAdDelete(null);
         }}
       />
@@ -213,7 +203,7 @@ export default function CampaignDetail() {
         confirmLabel="Delete"
         onCancel={() => setConfirmCampaignDelete(false)}
         onConfirm={() => {
-          dispatch({ type: 'CAMPAIGN_DELETE', payload: { id: campaign.id } });
+          void commands.deleteCampaign(campaign.id);
           setConfirmCampaignDelete(false);
           navigate('/campaigns');
         }}

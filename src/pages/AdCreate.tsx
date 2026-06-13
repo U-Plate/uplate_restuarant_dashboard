@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
-import type { Ad, AdLocation, Targeting } from '../types';
+import type { AdLocation, Targeting } from '../types';
 import { Button } from '../components/ui/Button';
 import { ConfirmDialog } from '../components/ui/ConfirmDialog';
 import { StickyBar } from '../components/ui/StickyBar';
@@ -9,7 +9,7 @@ import { AdForm } from '../components/ad/AdForm';
 import { AdPreview } from '../components/ad/AdPreview';
 import { TargetingBuilder } from '../components/targeting/TargetingBuilder';
 import { useApp } from '../store/AppContext';
-import { newAdSkeleton, emptyTargeting } from '../lib/clone';
+import { emptyTargeting } from '../lib/clone';
 
 interface Draft {
   title: string;
@@ -31,7 +31,7 @@ const INITIAL_DRAFT: Draft = {
 
 export default function AdCreate() {
   const { id } = useParams();
-  const { state, dispatch } = useApp();
+  const { state, commands } = useApp();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -90,21 +90,23 @@ export default function AdCreate() {
   const titleValid = draft.title.trim().length > 0;
   const canCreate = titleValid;
 
-  const handleCreate = () => {
+  const handleCreate = async () => {
     if (!canCreate || submitting) return;
     setSubmitting(true);
-    const skeleton = newAdSkeleton(campaign.id);
-    const ad: Ad = {
-      ...skeleton,
-      title: draft.title.trim(),
-      description: draft.description.trim(),
-      redirectUrl: draft.redirectUrl.trim(),
-      iconUrl: draft.iconUrl?.trim() || undefined,
-      location: draft.location,
-      targeting: draft.targeting,
-    };
-    dispatch({ type: 'AD_CREATE', payload: ad });
-    navigate(`/campaigns/${campaign.id}/ads/${ad.id}`, { replace: true });
+    try {
+      const ad = await commands.createAd({
+        campaignId: campaign.id,
+        title: draft.title.trim(),
+        description: draft.description.trim(),
+        redirectUrl: draft.redirectUrl.trim(),
+        iconUrl: draft.iconUrl?.trim() || undefined,
+        location: draft.location,
+        targeting: draft.targeting,
+      });
+      navigate(`/campaigns/${campaign.id}/ads/${ad.id}`, { replace: true });
+    } catch {
+      setSubmitting(false);
+    }
   };
 
   const requestDiscard = (to: string) => {

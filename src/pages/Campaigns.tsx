@@ -9,7 +9,6 @@ import { BrowseChrome } from '../components/layout/BrowseChrome';
 import { useApp } from '../store/AppContext';
 import { campaignsInOrder } from '../store/selectors';
 import { campaignWindow } from '../lib/verdict';
-import { newCampaignSkeleton } from '../lib/clone';
 import type { Campaign } from '../types';
 
 type SortKey = 'updated' | 'name' | 'clicks' | 'status';
@@ -23,7 +22,7 @@ const SORT_OPTIONS = [
 ];
 
 export default function CampaignsPage() {
-  const { state, dispatch } = useApp();
+  const { state, commands } = useApp();
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const [showForm, setShowForm] = useState(false);
@@ -95,9 +94,8 @@ export default function CampaignsPage() {
         <CampaignForm
           open={showForm}
           onClose={() => setShowForm(false)}
-          onSubmit={(data) => {
-            const c = { ...newCampaignSkeleton(), ...data };
-            dispatch({ type: 'CAMPAIGN_CREATE', payload: c });
+          onSubmit={async (data) => {
+            const c = await commands.createCampaign(data);
             setShowForm(false);
             navigate(`/campaigns/${c.id}`);
           }}
@@ -143,9 +141,8 @@ export default function CampaignsPage() {
       <CampaignForm
         open={showForm}
         onClose={() => setShowForm(false)}
-        onSubmit={(data) => {
-          const c = { ...newCampaignSkeleton(), ...data };
-          dispatch({ type: 'CAMPAIGN_CREATE', payload: c });
+        onSubmit={async (data) => {
+          const c = await commands.createCampaign(data);
           setShowForm(false);
           navigate(`/campaigns/${c.id}`);
         }}
@@ -159,7 +156,7 @@ export default function CampaignsPage() {
         onCancel={() => setPendingDelete(null)}
         onConfirm={() => {
           if (pendingDelete) {
-            dispatch({ type: 'CAMPAIGN_DELETE', payload: { id: pendingDelete.id } });
+            void commands.deleteCampaign(pendingDelete.id);
           }
           setPendingDelete(null);
         }}

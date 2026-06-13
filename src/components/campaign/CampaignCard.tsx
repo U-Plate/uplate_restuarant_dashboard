@@ -17,7 +17,6 @@ import { useApp } from '../../store/AppContext';
 import { adsForCampaign } from '../../store/selectors';
 import { formatNumber, formatPercent, formatRelativeTime } from '../../lib/format';
 import { campaignWindow } from '../../lib/verdict';
-import { cloneCampaign } from '../../lib/clone';
 
 interface CampaignCardProps {
   campaign: Campaign;
@@ -26,7 +25,7 @@ interface CampaignCardProps {
 }
 
 export function CampaignCard({ campaign, isTop, onDeleteRequest }: CampaignCardProps) {
-  const { state, dispatch } = useApp();
+  const { state, commands } = useApp();
   const navigate = useNavigate();
   const window = campaignWindow(state, campaign.id);
   const ads = adsForCampaign(state, campaign.id);
@@ -38,13 +37,9 @@ export function CampaignCard({ campaign, isTop, onDeleteRequest }: CampaignCardP
   const isEnded = daysToEnd < 0;
   const isEndingSoon = !isEnded && daysToEnd <= 4 && isActive;
 
-  const handleDuplicate = () => {
-    const cloned = cloneCampaign(campaign, ads);
-    dispatch({
-      type: 'CAMPAIGN_DUPLICATE',
-      payload: { id: campaign.id, newCampaign: cloned.campaign, newAds: cloned.ads },
-    });
-    navigate(`/campaigns/${cloned.campaign.id}`);
+  const handleDuplicate = async () => {
+    const created = await commands.duplicateCampaign(campaign.id);
+    navigate(`/campaigns/${created.id}`);
   };
 
   const open = () => navigate(`/campaigns/${campaign.id}`);
@@ -146,7 +141,7 @@ export function CampaignCard({ campaign, isTop, onDeleteRequest }: CampaignCardP
                 label: isActive ? 'Pause' : 'Activate',
                 icon: isActive ? <Pause size={14} /> : <Play size={14} />,
                 onClick: () =>
-                  dispatch({ type: 'CAMPAIGN_TOGGLE_STATUS', payload: { id: campaign.id } }),
+                  void commands.toggleCampaignStatus(campaign.id),
               },
               { label: 'Duplicate', icon: <Copy size={14} />, onClick: handleDuplicate },
               {
