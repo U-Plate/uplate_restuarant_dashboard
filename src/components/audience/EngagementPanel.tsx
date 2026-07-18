@@ -10,12 +10,13 @@ interface EngagementPanelProps {
   error?: boolean;
 }
 
-type Section = 'tags' | 'dietary' | 'food';
+type Section = 'tags' | 'dietary' | 'food' | 'cuisine';
 
 const SECTION_LABEL: Record<Section, string> = {
   tags: 'Audience tags',
   dietary: 'Dietary',
   food: 'Food interests',
+  cuisine: 'Cuisine interests',
 };
 
 export function EngagementPanel({ engagement, error = false }: EngagementPanelProps) {
@@ -27,7 +28,9 @@ export function EngagementPanel({ engagement, error = false }: EngagementPanelPr
       ? data?.topAudienceTags ?? []
       : section === 'dietary'
         ? data?.topDietary ?? []
-        : data?.topFoodInterests ?? [];
+        : section === 'food'
+          ? data?.topFoodInterests ?? []
+          : data?.topCuisineInterests ?? [];
 
   return (
     <section

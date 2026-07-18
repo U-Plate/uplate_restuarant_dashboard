@@ -118,6 +118,7 @@ export function summarizeTargeting(t: Targeting): TargetingSummary {
   for (const r of t.audienceTags) bump(r.priority);
   for (const d of t.dietary) bump(d.priority);
   for (const f of t.foodInterests) bump(f.priority);
+  for (const c of t.cuisineInterests) bump(c.priority);
   if (t.behavioral.recurringCustomer) bump(t.behavioral.recurringPriority);
   return counts;
 }

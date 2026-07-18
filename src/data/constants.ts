@@ -15,9 +15,8 @@ export const DEMO_SCHOOL_ID = 'purdue';
 export const AUDIENCE_TAGS: { value: AudienceTag; label: string; hint: string }[] = [
   { value: 'highProtein', label: 'High Protein', hint: 'Users tracking protein intake' },
   { value: 'highCarb', label: 'High Carb', hint: 'Carb-focused fueling' },
-  { value: 'postWorkout', label: 'Post-Workout', hint: 'Within 2h of gym activity' },
   { value: 'lowCalorie', label: 'Low Calorie', hint: 'Calorie-conscious choices' },
-  { value: 'macroFriendly', label: 'Macro Friendly', hint: 'Balanced macro splits' },
+
 ];
 
 export const DIETARY_PREFS: { value: DietaryPreference; label: string }[] = [
@@ -93,6 +92,27 @@ export const FOOD_INTEREST_SUGGESTIONS: string[] = [
   'Wrap',
 ];
 
+export const CUISINE_INTEREST_SUGGESTIONS: string[] = [
+  'Italian',
+  'Mexican',
+  'Thai',
+  'Chinese',
+  'Indian',
+  'Japanese',
+  'Mediterranean',
+  'American',
+  'French',
+  'Korean',
+  'Vietnamese',
+  'Greek',
+  'Middle Eastern',
+  'Caribbean',
+  'BBQ',
+  'Southern',
+  'Cajun/Creole',
+  'Latin American',
+];
+
 export const PRIORITY_LABEL: Record<Priority, string> = {
   required: 'Required',
   high: 'High',
@@ -103,9 +123,8 @@ export const PRIORITY_LABEL: Record<Priority, string> = {
 export const AUDIENCE_LABEL: Record<AudienceTag, string> = {
   highProtein: 'High Protein',
   highCarb: 'High Carb',
-  postWorkout: 'Post-Workout',
   lowCalorie: 'Low Calorie',
-  macroFriendly: 'Macro Friendly',
+
 };
 
 export const DIETARY_LABEL: Record<DietaryPreference, string> = {

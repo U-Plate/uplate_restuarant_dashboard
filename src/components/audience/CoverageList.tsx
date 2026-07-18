@@ -7,12 +7,13 @@ import {
   DIETARY_LABEL,
 } from '../../data/constants';
 
-type Category = 'tags' | 'dietary' | 'food' | 'exclusions' | 'behavioral';
+type Category = 'tags' | 'dietary' | 'food' | 'cuisine' | 'exclusions' | 'behavioral';
 
 const CATEGORY_LABEL: Record<Category, string> = {
   tags: 'Audience tags',
   dietary: 'Dietary',
   food: 'Food interests',
+  cuisine: 'Cuisine interests',
   exclusions: 'Allergens excluded',
   behavioral: 'Behavioral',
 };
@@ -125,6 +126,19 @@ function buildRows(state: AppState, category: Category): SummaryRow[] {
     for (const ad of ads) {
       for (const f of ad.targeting.foodInterests) {
         const k = f.name.toLowerCase();
+        counts.set(k, (counts.get(k) ?? 0) + 1);
+      }
+    }
+    return Array.from(counts.entries())
+      .map(([key, count]) => ({ key, label: titleCase(key), count }))
+      .sort((a, b) => b.count - a.count);
+  }
+
+  if (category === 'cuisine') {
+    const counts = new Map<string, number>();
+    for (const ad of ads) {
+      for (const c of ad.targeting.cuisineInterests) {
+        const k = c.name.toLowerCase();
         counts.set(k, (counts.get(k) ?? 0) + 1);
       }
     }

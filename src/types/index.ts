@@ -3,9 +3,8 @@ export type Priority = 'required' | 'high' | 'medium' | 'low';
 export type AudienceTag =
   | 'highProtein'
   | 'highCarb'
-  | 'postWorkout'
   | 'lowCalorie'
-  | 'macroFriendly';
+
 
 export type DietaryPreference =
   | 'vegan'
@@ -49,6 +48,11 @@ export interface FoodInterestRule {
   priority: Priority;
 }
 
+export interface CuisineInterestRule {
+  name: string;
+  priority: Priority;
+}
+
 export interface TimeRange {
   startHour: number;
   endHour: number;
@@ -68,6 +72,7 @@ export interface Targeting {
   audienceTags: AudienceTagRule[];
   dietary: DietaryRule[];
   foodInterests: FoodInterestRule[];
+  cuisineInterests: CuisineInterestRule[];
   exclusions: Allergy[];
   behavioral: BehavioralTargeting;
   time: TimeTargeting;
@@ -88,11 +93,11 @@ export interface AdMetrics {
 export type AdEventType = 'impression' | 'click';
 
 // One row per impression or click. Multi-valued audience signals
-// (tags / dietary / foodInterests) snapshot what the viewer matched at the
-// moment of the event — same shape the wire contract documents in
-// backend.md (`ad_events` + `ad_event_tags` / `ad_event_dietary` /
-// `ad_event_food_interests`). All analytics aggregates in the app fall out
-// of GROUP BY over these rows.
+// (tags / dietary / foodInterests / cuisineInterests) snapshot what the
+// viewer matched at the moment of the event — same shape the wire contract
+// documents in backend.md (`ad_events` + `ad_event_tags` / `ad_event_dietary`
+// / `ad_event_food_interests` / `ad_event_cuisine_interests`). All analytics
+// aggregates in the app fall out of GROUP BY over these rows.
 export interface AdEvent {
   id: string;
   adId: string;
@@ -103,6 +108,7 @@ export interface AdEvent {
   tags: AudienceTag[];
   dietary: DietaryPreference[];
   foodInterests: string[];
+  cuisineInterests: string[];
 }
 
 export interface Ad {

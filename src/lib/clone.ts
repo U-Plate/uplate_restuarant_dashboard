@@ -7,6 +7,7 @@ export function emptyTargeting(): Targeting {
     audienceTags: [],
     dietary: [],
     foodInterests: [],
+    cuisineInterests: [],
     exclusions: [],
     behavioral: { recurringCustomer: false, recurringPriority: 'medium' },
     time: { range: null, days: [] },

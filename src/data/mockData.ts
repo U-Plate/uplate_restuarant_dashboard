@@ -31,9 +31,8 @@ function daysAgo(n: number): string {
 const ALL_AUDIENCE_TAGS: AudienceTag[] = [
   'highProtein',
   'highCarb',
-  'postWorkout',
   'lowCalorie',
-  'macroFriendly',
+
 ];
 
 const ALL_DIETARY: DietaryPreference[] = [
@@ -51,6 +50,14 @@ const OFF_TARGET_FOODS: string[] = [
   'Burrito Bowl',
   'Energy Bar',
   'Açaí Bowl',
+];
+
+const OFF_TARGET_CUISINES: string[] = [
+  'Chinese',
+  'Korean',
+  'Southern',
+  'Caribbean',
+  'Vietnamese',
 ];
 
 const ALL_DAYS: DayOfWeek[] = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
@@ -106,6 +113,7 @@ function generateEventsForAd(
   const targetedTagSet = new Set(targeting.audienceTags.map((r) => r.tag));
   const targetedDietSet = new Set(targeting.dietary.map((r) => r.pref));
   const targetedFoods = targeting.foodInterests.map((r) => r.name);
+  const targetedCuisines = targeting.cuisineInterests.map((r) => r.name);
   const targetedDays = new Set<DayOfWeek>(
     targeting.time.days.length > 0 ? targeting.time.days : ALL_DAYS,
   );
@@ -160,6 +168,14 @@ function generateEventsForAd(
       if (!foodInterests.includes(name)) foodInterests.push(name);
     }
 
+    const cuisineInterests: string[] = [];
+    for (const name of targetedCuisines) {
+      if (rand() < (isClick ? 0.66 : 0.48)) cuisineInterests.push(name);
+    }
+    for (const name of pickWeighted(OFF_TARGET_CUISINES, isClick ? 0.08 : 0.14, rand)) {
+      if (!cuisineInterests.includes(name)) cuisineInterests.push(name);
+    }
+
     const recurringProb = wantsRecurring
       ? isClick
         ? 0.72
@@ -177,6 +193,7 @@ function generateEventsForAd(
       tags,
       dietary,
       foodInterests,
+      cuisineInterests,
     });
   }
 
@@ -213,6 +230,7 @@ function emptyTargeting(): Targeting {
     audienceTags: [],
     dietary: [],
     foodInterests: [],
+    cuisineInterests: [],
     exclusions: [],
     behavioral: { recurringCustomer: false, recurringPriority: 'medium' },
     time: { range: null, days: [] },
@@ -289,12 +307,12 @@ export function buildSeedState(): AppState {
         ...emptyTargeting(),
         audienceTags: [
           { tag: 'highProtein', priority: 'required' },
-          { tag: 'postWorkout', priority: 'high' },
         ],
         foodInterests: [
           { name: 'Quinoa Bowl', priority: 'high' },
           { name: 'Protein Shake', priority: 'medium' },
         ],
+        cuisineInterests: [{ name: 'Mediterranean', priority: 'high' }],
         time: { range: { startHour: 11, endHour: 21 }, days: ['mon', 'tue', 'wed', 'thu', 'fri'] },
       },
       101,
@@ -313,10 +331,11 @@ export function buildSeedState(): AppState {
         ...emptyTargeting(),
         audienceTags: [
           { tag: 'highProtein', priority: 'high' },
-          { tag: 'macroFriendly', priority: 'required' },
+
         ],
         dietary: [{ pref: 'pescatarian', priority: 'medium' }],
         foodInterests: [{ name: 'Grilled Salmon', priority: 'high' }],
+        cuisineInterests: [{ name: 'American', priority: 'medium' }],
       },
       102,
       'active',
@@ -332,8 +351,8 @@ export function buildSeedState(): AppState {
       'https://uplate.app/order/greek-yogurt-cup',
       {
         ...emptyTargeting(),
-        audienceTags: [{ tag: 'postWorkout', priority: 'required' }],
         foodInterests: [{ name: 'Greek Yogurt', priority: 'required' }],
+        cuisineInterests: [{ name: 'Greek', priority: 'high' }],
         exclusions: ['dairy'],
       },
       103,
@@ -368,7 +387,7 @@ export function buildSeedState(): AppState {
       {
         ...emptyTargeting(),
         audienceTags: [
-          { tag: 'macroFriendly', priority: 'medium' },
+
           { tag: 'lowCalorie', priority: 'low' },
         ],
         dietary: [
@@ -379,6 +398,7 @@ export function buildSeedState(): AppState {
           { name: 'Tofu Stir-Fry', priority: 'high' },
           { name: 'Rice Bowl', priority: 'medium' },
         ],
+        cuisineInterests: [{ name: 'Thai', priority: 'medium' }],
         time: { range: { startHour: 11, endHour: 14 }, days: ['mon', 'tue', 'wed', 'thu', 'fri'] },
       },
       201,
@@ -398,6 +418,7 @@ export function buildSeedState(): AppState {
         audienceTags: [{ tag: 'highProtein', priority: 'medium' }],
         dietary: [{ pref: 'vegetarian', priority: 'high' }, { pref: 'vegan', priority: 'medium' }],
         foodInterests: [{ name: 'Falafel', priority: 'required' }],
+        cuisineInterests: [{ name: 'Middle Eastern', priority: 'high' }],
       },
       202,
       'active',
@@ -432,6 +453,7 @@ export function buildSeedState(): AppState {
         ...emptyTargeting(),
         audienceTags: [{ tag: 'highCarb', priority: 'high' }],
         foodInterests: [{ name: 'Ramen', priority: 'required' }],
+        cuisineInterests: [{ name: 'Japanese', priority: 'required' }],
         behavioral: { recurringCustomer: true, recurringPriority: 'high' },
         time: { range: { startHour: 21, endHour: 2 }, days: ['thu', 'fri', 'sat'] },
       },
@@ -453,6 +475,7 @@ export function buildSeedState(): AppState {
           { name: 'Matcha Latte', priority: 'high' },
           { name: 'Croissant', priority: 'high' },
         ],
+        cuisineInterests: [{ name: 'French', priority: 'medium' }],
         behavioral: { recurringCustomer: true, recurringPriority: 'medium' },
       },
       302,
@@ -486,10 +509,11 @@ export function buildSeedState(): AppState {
       {
         ...emptyTargeting(),
         audienceTags: [
-          { tag: 'macroFriendly', priority: 'required' },
+
           { tag: 'lowCalorie', priority: 'high' },
         ],
         foodInterests: [{ name: 'Oat Bowl', priority: 'high' }],
+        cuisineInterests: [{ name: 'American', priority: 'low' }],
         time: { range: { startHour: 7, endHour: 11 }, days: ['mon', 'tue', 'wed', 'thu', 'fri'] },
       },
       401,
@@ -512,6 +536,7 @@ export function buildSeedState(): AppState {
           { name: 'Avocado Toast', priority: 'required' },
           { name: 'Cold Brew', priority: 'medium' },
         ],
+        cuisineInterests: [{ name: 'American', priority: 'medium' }],
         time: { range: { startHour: 7, endHour: 12 }, days: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] },
       },
       402,

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
-import { Clock, Leaf, Repeat, Sparkles, Target, Utensils } from 'lucide-react';
+import { ChefHat, Clock, Leaf, Repeat, Sparkles, Target, Utensils } from 'lucide-react';
 import type { Ad } from '../../types';
 import { Card } from '../ui/Card';
 import { formatNumber, formatPercent } from '../../lib/format';
@@ -105,6 +105,17 @@ export function ClickAudienceSignals({ ad }: ClickAudienceSignalsProps) {
         <Section icon={<Utensils size={13} />} title="Food interests">
           <SignalList
             rows={data.topFoodInterests.map((r) => ({
+              key: r.name,
+              label: r.name,
+              pct: r.pct,
+              targeted: r.targeted,
+            }))}
+          />
+        </Section>
+
+        <Section icon={<ChefHat size={13} />} title="Cuisine interests">
+          <SignalList
+            rows={data.topCuisineInterests.map((r) => ({
               key: r.name,
               label: r.name,
               pct: r.pct,

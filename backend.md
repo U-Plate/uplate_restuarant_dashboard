@@ -491,6 +491,13 @@ CREATE TABLE ad_food_interests (
   PRIMARY KEY (ad_id, name)
 );
 
+CREATE TABLE ad_cuisine_interests (
+  ad_id     TEXT NOT NULL REFERENCES ads(id) ON DELETE CASCADE,
+  name      TEXT NOT NULL,    -- free-text cuisine interest (store original case)
+  priority  TEXT NOT NULL,
+  PRIMARY KEY (ad_id, name)
+);
+
 CREATE TABLE ad_exclusions (
   ad_id     TEXT NOT NULL REFERENCES ads(id) ON DELETE CASCADE,
   allergy   TEXT NOT NULL,    -- Allergy
@@ -549,6 +556,14 @@ CREATE TABLE ad_event_food_interests (
   PRIMARY KEY (event_id, name)
 );
 CREATE INDEX idx_event_food_ad ON ad_event_food_interests(ad_id, name);
+
+CREATE TABLE ad_event_cuisine_interests (
+  event_id  TEXT NOT NULL REFERENCES ad_events(id) ON DELETE CASCADE,
+  ad_id     TEXT NOT NULL,
+  name      TEXT NOT NULL,    -- store normalized lowercase for grouping
+  PRIMARY KEY (event_id, name)
+);
+CREATE INDEX idx_event_cuisine_ad ON ad_event_cuisine_interests(ad_id, name);
 ```
 
 ### 7.1 Mapping a stored ad back to the `Targeting` DTO
@@ -560,6 +575,7 @@ targeting = {
   audienceTags:  ad_audience_tags rows  → [{ tag, priority }],
   dietary:       ad_dietary rows        → [{ pref, priority }],
   foodInterests: ad_food_interests rows → [{ name, priority }],
+  cuisineInterests: ad_cuisine_interests rows → [{ name, priority }],
   exclusions:    ad_exclusions rows     → [allergy, ...],
   behavioral:    { recurringCustomer: !!ads.recurring_customer,
                    recurringPriority: ads.recurring_priority },
@@ -616,6 +632,7 @@ interface Targeting {
   audienceTags:  { tag: AudienceTag; priority: Priority }[];
   dietary:       { pref: DietaryPreference; priority: Priority }[];
   foodInterests: { name: string; priority: Priority }[];
+  cuisineInterests: { name: string; priority: Priority }[];
   exclusions:    Allergy[];
   behavioral:    { recurringCustomer: boolean; recurringPriority: Priority };
   time:          { range: { startHour: number; endHour: number } | null; days: DayOfWeek[] };
@@ -941,6 +958,7 @@ AudienceEngagement {
   topAudienceTags:  { key, label, pct, targeted }[];  // top 5 by pct
   topDietary:       { key, label, pct, targeted }[];   // top 5
   topFoodInterests: { key, label, pct, targeted }[];   // top 5 (key = lowercased name)
+  topCuisineInterests: { key, label, pct, targeted }[]; // top 5 (key = lowercased name)
   recurringPct: number;
   contributingAdCount: number;            // # ads with >= 1 click
 }
@@ -970,7 +988,7 @@ AudienceEngagement {
   call instead of issuing one `click-signals` request per ad. Operate only on
   `type='click'` events; `totalClicks` is their count.
   ```sql
-  -- audience tags (analogous for dietary; food groups on lowercased name)
+  -- audience tags (analogous for dietary; food/cuisine groups on lowercased name)
   SELECT t.tag, COUNT(*) AS count
   FROM ad_event_tags t JOIN ad_events e ON e.id = t.event_id
   WHERE e.restaurant_id = :rid AND e.type='click'
@@ -978,8 +996,8 @@ AudienceEngagement {
   ```
   Each row's `pct = count / totalClicks` (0 if no clicks); take top 5 by `pct`.
   `targeted` = whether **any** of the restaurant's ads target that signal
-  (case-insensitive for foods). `label` from `AUDIENCE_LABEL`/`DIETARY_LABEL`,
-  or the original-cased food name (else Title-Case). `recurringPct =
+  (case-insensitive for foods/cuisines). `label` from `AUDIENCE_LABEL`/`DIETARY_LABEL`,
+  or the original-cased food/cuisine name (else Title-Case). `recurringPct =
   recurringClicks / totalClicks`. `contributingAdCount =
   COUNT(DISTINCT ad_id)` among the click events.
 - **heatmap** (targeting-based, config not events): a `7*24` array indexed
@@ -1010,6 +1028,7 @@ ClickSignalsResponse {
   topAudienceTags: { tag, label, pct, targeted }[];   // top 5 by pct
   topDietary:      { pref, label, pct, targeted }[];   // top 5
   topFoodInterests:{ name, pct, targeted }[];          // top 5
+  topCuisineInterests:{ name, pct, targeted }[];       // top 5
   recurringPct: number;
   clicksByDay:  number[/*7, normalized, Mon-indexed*/];
   clicksByHour: number[/*24, normalized*/];
@@ -1024,13 +1043,14 @@ ClickSignalsResponse {
   FROM ad_event_tags t JOIN ad_events e ON e.id = t.event_id
   WHERE t.ad_id = :adId AND e.type='click'
   GROUP BY t.tag ORDER BY count DESC LIMIT 5;
-  -- analogous for ad_event_dietary (pref) and ad_event_food_interests (name)
+  -- analogous for ad_event_dietary (pref), ad_event_food_interests (name),
+  -- and ad_event_cuisine_interests (name)
   ```
 - `label` comes from the constant maps (`AUDIENCE_LABEL`, `DIETARY_LABEL` in
-  `src/data/constants.ts`); for foods use the ad's original-cased targeted name
-  if it matches, else Title-Case the stored lowercase name.
-- `targeted` = whether the ad's own targeting includes that tag/pref/food
-  (case-insensitive for foods).
+  `src/data/constants.ts`); for foods/cuisines use the ad's original-cased
+  targeted name if it matches, else Title-Case the stored lowercase name.
+- `targeted` = whether the ad's own targeting includes that tag/pref/food/cuisine
+  (case-insensitive for foods/cuisines).
 - `recurringPct` = `recurringClicks / totalClicks`.
 - **clicksByDay** (length 7, Mon-indexed) and **clicksByHour** (length 24) are
   each **normalized to sum ≈ 1** (divide each bucket by the total clicks across
@@ -1070,7 +1090,8 @@ Request:
       "recurringCustomer": true,
       "tags": ["highProtein", "postWorkout"],
       "dietary": ["pescatarian"],
-      "foodInterests": ["Quinoa Bowl"]
+      "foodInterests": ["Quinoa Bowl"],
+      "cuisineInterests": ["Mediterranean"]
     }
   ]
 }
@@ -1080,7 +1101,8 @@ Rules:
 - Resolve `restaurant_id` from `ad_id`; reject unknown ads.
 - `type ∈ {impression, click}`; `occurredAt` required ISO; default
   `recurringCustomer=false`; arrays default empty.
-- Store `foodInterests` lowercased in `ad_event_food_interests` (matches §11.7
+- Store `foodInterests`/`cuisineInterests` lowercased in
+  `ad_event_food_interests`/`ad_event_cuisine_interests` (matches §11.7
   grouping); keep `tags`/`dietary` as their enum values.
 - Idempotency: accept an optional client-supplied `id` per event and `INSERT OR
   IGNORE` so retries are safe.
@@ -1092,8 +1114,8 @@ priority score. Optional for v1 if the consumer app does its own matching, but
 documented because targeting only has meaning when something consumes it.
 
 Query: `location=homeScreen|diningHallMenu`, plus the user's signal context
-(tags, dietary, allergies, foodInterests, recurringCustomer, current local
-time). Matching mirrors the priority weights in `src/data/constants.ts`
+(tags, dietary, allergies, foodInterests, cuisineInterests, recurringCustomer,
+current local time). Matching mirrors the priority weights in `src/data/constants.ts`
 (`required=4, high=3, medium=2, low=1`):
 - **Hard filter**: ad `status='active'`; the user must not have any allergy in
   the ad's `exclusions`; if the ad has a time window/days, the current local

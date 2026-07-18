@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import {
   Ban,
+  ChefHat,
   Clock,
   Leaf,
   Pencil,
@@ -148,6 +149,7 @@ export function TargetSummaryCard({ targeting, onEdit }: TargetSummaryCardProps)
     audienceTags,
     dietary,
     foodInterests,
+    cuisineInterests,
     exclusions,
     behavioral,
     time,
@@ -157,6 +159,7 @@ export function TargetSummaryCard({ targeting, onEdit }: TargetSummaryCardProps)
     audienceTags.length +
     dietary.length +
     foodInterests.length +
+    cuisineInterests.length +
     (behavioral.recurringCustomer ? 1 : 0);
 
   return (
@@ -223,6 +226,16 @@ export function TargetSummaryCard({ targeting, onEdit }: TargetSummaryCardProps)
           >
             {foodInterests.map((f) => (
               <ChipRow key={f.name} label={f.name} priority={f.priority} />
+            ))}
+          </Section>
+
+          <Section
+            icon={<ChefHat size={13} />}
+            title="Cuisine interests"
+            empty={cuisineInterests.length === 0 ? 'No cuisine interests' : undefined}
+          >
+            {cuisineInterests.map((c) => (
+              <ChipRow key={c.name} label={c.name} priority={c.priority} />
             ))}
           </Section>
 

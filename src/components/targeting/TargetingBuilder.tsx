@@ -4,6 +4,7 @@ import { summarizeTargeting } from '../../lib/targeting';
 import { AudienceTagSection } from './AudienceTagSection';
 import { DietarySection } from './DietarySection';
 import { FoodInterestSection } from './FoodInterestSection';
+import { CuisineInterestSection } from './CuisineInterestSection';
 import { ExclusionsSection } from './ExclusionsSection';
 import { BehavioralSection } from './BehavioralSection';
 import { TimeTargetingSection } from './TimeTargetingSection';
@@ -17,6 +18,7 @@ type SectionKey =
   | 'audienceTags'
   | 'dietary'
   | 'foodInterests'
+  | 'cuisineInterests'
   | 'exclusions'
   | 'time'
   | 'behavioral';
@@ -26,6 +28,7 @@ function initialOpenMap(t: Targeting): Record<SectionKey, boolean> {
     audienceTags: t.audienceTags.length > 0,
     dietary: t.dietary.length > 0,
     foodInterests: t.foodInterests.length > 0,
+    cuisineInterests: t.cuisineInterests.length > 0,
     exclusions: t.exclusions.length > 0,
     time: t.time.range !== null || t.time.days.length > 0,
     behavioral: t.behavioral.recurringCustomer,
@@ -61,6 +64,12 @@ export function TargetingBuilder({ value, onChange }: TargetingBuilderProps) {
           onChange={(foodInterests) => onChange({ ...value, foodInterests })}
           isOpen={open.foodInterests}
           onToggle={() => toggle('foodInterests')}
+        />
+        <CuisineInterestSection
+          value={value.cuisineInterests}
+          onChange={(cuisineInterests) => onChange({ ...value, cuisineInterests })}
+          isOpen={open.cuisineInterests}
+          onToggle={() => toggle('cuisineInterests')}
         />
         <ExclusionsSection
           value={value.exclusions}

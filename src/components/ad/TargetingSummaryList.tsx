@@ -136,6 +136,7 @@ function buildRows(t: Targeting): SummaryRow[] {
     audienceRow(t),
     dietaryRow(t),
     foodRow(t),
+    cuisineRow(t),
     exclusionsRow(t),
     behavioralRow(t),
     timeRow(t),
@@ -171,6 +172,17 @@ function foodRow(t: Targeting): SummaryRow {
   return {
     label: 'Food interests',
     value: t.foodInterests.map((f) => withPriority(f.name, f.priority)).join(', '),
+    empty: false,
+  };
+}
+
+function cuisineRow(t: Targeting): SummaryRow {
+  if (t.cuisineInterests.length === 0) {
+    return { label: 'Cuisine interests', value: 'Not set', empty: true };
+  }
+  return {
+    label: 'Cuisine interests',
+    value: t.cuisineInterests.map((c) => withPriority(c.name, c.priority)).join(', '),
     empty: false,
   };
 }

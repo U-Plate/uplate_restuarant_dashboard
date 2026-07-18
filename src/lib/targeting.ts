@@ -30,6 +30,9 @@ export function describeTargeting(t: Targeting): string {
   if (t.foodInterests.length > 0) {
     parts.push(`${t.foodInterests.length} food${t.foodInterests.length === 1 ? '' : 's'}`);
   }
+  if (t.cuisineInterests.length > 0) {
+    parts.push(`${t.cuisineInterests.length} cuisine${t.cuisineInterests.length === 1 ? '' : 's'}`);
+  }
   if (t.exclusions.length > 0) {
     parts.push(`no ${t.exclusions.length === 1 ? t.exclusions[0] : `${t.exclusions.length} allergens`}`);
   }
@@ -97,12 +100,22 @@ export function summarizeTargeting(t: Targeting): string {
     subjects.push(`a ${joinList(diets)}${suffix} audience`);
   }
 
-  if (t.foodInterests.length > 0) {
-    const items = t.foodInterests.map((r) => r.name).slice(0, 3);
-    const more = t.foodInterests.length - items.length;
-    subjects.push(
-      `people who like ${joinList(items)}${more > 0 ? `, and ${more} more` : ''}`,
-    );
+  if (t.foodInterests.length > 0 || t.cuisineInterests.length > 0) {
+    let clause = '';
+    if (t.foodInterests.length > 0) {
+      const items = t.foodInterests.map((r) => r.name).slice(0, 3);
+      const more = t.foodInterests.length - items.length;
+      clause = `people who like ${joinList(items)}${more > 0 ? `, and ${more} more` : ''}`;
+    }
+    if (t.cuisineInterests.length > 0) {
+      const items = t.cuisineInterests.map((r) => r.name).slice(0, 3);
+      const more = t.cuisineInterests.length - items.length;
+      const cuisineClause = `${joinList(items)}${more > 0 ? `, and ${more} more` : ''} cuisine`;
+      clause = clause
+        ? `${clause}, with a taste for ${cuisineClause}`
+        : `people with a taste for ${cuisineClause}`;
+    }
+    subjects.push(clause);
   }
 
   if (t.behavioral.recurringCustomer) {

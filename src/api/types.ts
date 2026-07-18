@@ -297,6 +297,7 @@ export interface AudienceEngagement {
   topAudienceTags: AudienceEngagementRow[];
   topDietary: AudienceEngagementRow[];
   topFoodInterests: AudienceEngagementRow[];
+  topCuisineInterests: AudienceEngagementRow[];
   recurringPct: number;
   /** Number of ads that received at least one click. */
   contributingAdCount: number;
@@ -343,6 +344,11 @@ export interface ClickSignalsResponse {
     targeted: boolean;
   }>;
   topFoodInterests: Array<{
+    name: string;
+    pct: number;
+    targeted: boolean;
+  }>;
+  topCuisineInterests: Array<{
     name: string;
     pct: number;
     targeted: boolean;

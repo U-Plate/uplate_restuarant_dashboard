@@ -188,15 +188,18 @@ function aggregateAdEngagement(state: AppState): AudienceEngagement {
   const targetedTags = new Set<string>();
   const targetedDiet = new Set<string>();
   const targetedFood = new Map<string, string>(); // lowercased -> original case
+  const targetedCuisine = new Map<string, string>(); // lowercased -> original case
   for (const ad of Object.values(state.ads)) {
     for (const r of ad.targeting.audienceTags) targetedTags.add(r.tag);
     for (const r of ad.targeting.dietary) targetedDiet.add(r.pref);
     for (const r of ad.targeting.foodInterests) targetedFood.set(r.name.toLowerCase(), r.name);
+    for (const r of ad.targeting.cuisineInterests) targetedCuisine.set(r.name.toLowerCase(), r.name);
   }
 
   const tagCounts = new Map<string, number>();
   const dietCounts = new Map<string, number>();
   const foodCounts = new Map<string, number>();
+  const cuisineCounts = new Map<string, number>();
   const contributingAds = new Set<string>();
   let recurringClicks = 0;
   for (const ev of clickEvents) {
@@ -206,6 +209,10 @@ function aggregateAdEngagement(state: AppState): AudienceEngagement {
     for (const name of ev.foodInterests) {
       const k = name.toLowerCase();
       foodCounts.set(k, (foodCounts.get(k) ?? 0) + 1);
+    }
+    for (const name of ev.cuisineInterests) {
+      const k = name.toLowerCase();
+      cuisineCounts.set(k, (cuisineCounts.get(k) ?? 0) + 1);
     }
     if (ev.recurringCustomer) recurringClicks += 1;
   }
@@ -242,11 +249,22 @@ function aggregateAdEngagement(state: AppState): AudienceEngagement {
     .sort((a, b) => b.pct - a.pct)
     .slice(0, 5);
 
+  const topCuisineInterests = [...cuisineCounts.entries()]
+    .map(([key, count]) => ({
+      key,
+      label: targetedCuisine.get(key) ?? titleCase(key),
+      pct: safeDivide(count),
+      targeted: targetedCuisine.has(key),
+    }))
+    .sort((a, b) => b.pct - a.pct)
+    .slice(0, 5);
+
   return {
     totalClicks,
     topAudienceTags,
     topDietary,
     topFoodInterests,
+    topCuisineInterests,
     recurringPct: safeDivide(recurringClicks),
     contributingAdCount: contributingAds.size,
   };
@@ -820,6 +838,7 @@ export function createLocalClient(): ApiClient {
         const tagCounts = new Map<string, number>();
         const dietCounts = new Map<string, number>();
         const foodCounts = new Map<string, number>();
+        const cuisineCounts = new Map<string, number>();
         let recurringClicks = 0;
         const dayCounts = Array<number>(7).fill(0);
         const hourCounts = Array<number>(24).fill(0);
@@ -829,6 +848,10 @@ export function createLocalClient(): ApiClient {
           for (const name of ev.foodInterests) {
             const k = name.toLowerCase();
             foodCounts.set(k, (foodCounts.get(k) ?? 0) + 1);
+          }
+          for (const name of ev.cuisineInterests) {
+            const k = name.toLowerCase();
+            cuisineCounts.set(k, (cuisineCounts.get(k) ?? 0) + 1);
           }
           if (ev.recurringCustomer) recurringClicks += 1;
           const d = new Date(ev.occurredAt);
@@ -841,6 +864,9 @@ export function createLocalClient(): ApiClient {
         const targetedDietSet = new Set(ad.targeting.dietary.map((r) => r.pref));
         const targetedFoodMap = new Map(
           ad.targeting.foodInterests.map((r) => [r.name.toLowerCase(), r.name] as const),
+        );
+        const targetedCuisineMap = new Map(
+          ad.targeting.cuisineInterests.map((r) => [r.name.toLowerCase(), r.name] as const),
         );
 
         const topAudienceTags = [...tagCounts.entries()]
@@ -872,6 +898,15 @@ export function createLocalClient(): ApiClient {
           .sort((a, b) => b.pct - a.pct)
           .slice(0, 5);
 
+        const topCuisineInterests = [...cuisineCounts.entries()]
+          .map(([key, count]) => ({
+            name: targetedCuisineMap.get(key) ?? titleCase(key),
+            pct: safeDivide(count),
+            targeted: targetedCuisineMap.has(key),
+          }))
+          .sort((a, b) => b.pct - a.pct)
+          .slice(0, 5);
+
         const dayTotal = dayCounts.reduce((a, b) => a + b, 0) || 1;
         const hourTotal = hourCounts.reduce((a, b) => a + b, 0) || 1;
         const clicksByDay = dayCounts.map((n) => n / dayTotal);
@@ -883,6 +918,7 @@ export function createLocalClient(): ApiClient {
           topAudienceTags,
           topDietary,
           topFoodInterests,
+          topCuisineInterests,
           recurringPct: safeDivide(recurringClicks),
           clicksByDay,
           clicksByHour,
