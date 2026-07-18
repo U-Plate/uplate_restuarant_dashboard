@@ -69,6 +69,14 @@ function load(): AppState {
         save(seed);
         return seed;
       }
+      // Backfill `cuisineInterests` for ads/events persisted before the
+      // field existed.
+      for (const ad of Object.values(parsed.ads ?? {})) {
+        if (!ad.targeting.cuisineInterests) ad.targeting.cuisineInterests = [];
+      }
+      for (const ev of parsed.events) {
+        if (!ev.cuisineInterests) ev.cuisineInterests = [];
+      }
       return parsed;
     }
   } catch {

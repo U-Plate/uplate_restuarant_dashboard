@@ -10,12 +10,16 @@ export function loadState(): AppState | null {
     // Backfill `location` for ads persisted before the field existed.
     for (const ad of Object.values(parsed.ads ?? {})) {
       if (!ad.location) ad.location = 'homeScreen';
+      if (!ad.targeting.cuisineInterests) ad.targeting.cuisineInterests = [];
     }
     // Pre-events snapshots have no per-event audience signals. Fall back
     // to the fresh seed so the click-signals breakdown stays real instead
     // of fabricating events on the fly.
     if (!Array.isArray(parsed.events) || parsed.events.length === 0) {
       return null;
+    }
+    for (const ev of parsed.events) {
+      if (!ev.cuisineInterests) ev.cuisineInterests = [];
     }
     return parsed;
   } catch {

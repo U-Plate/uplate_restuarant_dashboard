@@ -3,8 +3,7 @@ export type Priority = 'required' | 'high' | 'medium' | 'low';
 export type AudienceTag =
   | 'highProtein'
   | 'highCarb'
-  | 'lowCalorie'
-
+  | 'lowCalorie';
 
 export type DietaryPreference =
   | 'vegan'

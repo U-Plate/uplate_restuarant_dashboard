@@ -16,7 +16,6 @@ export const AUDIENCE_TAGS: { value: AudienceTag; label: string; hint: string }[
   { value: 'highProtein', label: 'High Protein', hint: 'Users tracking protein intake' },
   { value: 'highCarb', label: 'High Carb', hint: 'Carb-focused fueling' },
   { value: 'lowCalorie', label: 'Low Calorie', hint: 'Calorie-conscious choices' },
-
 ];
 
 export const DIETARY_PREFS: { value: DietaryPreference; label: string }[] = [
@@ -124,7 +123,6 @@ export const AUDIENCE_LABEL: Record<AudienceTag, string> = {
   highProtein: 'High Protein',
   highCarb: 'High Carb',
   lowCalorie: 'Low Calorie',
-
 };
 
 export const DIETARY_LABEL: Record<DietaryPreference, string> = {

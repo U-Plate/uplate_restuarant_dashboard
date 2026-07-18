@@ -32,7 +32,6 @@ const ALL_AUDIENCE_TAGS: AudienceTag[] = [
   'highProtein',
   'highCarb',
   'lowCalorie',
-
 ];
 
 const ALL_DIETARY: DietaryPreference[] = [
@@ -329,10 +328,7 @@ export function buildSeedState(): AppState {
       'https://uplate.app/order/salmon-macro-plate',
       {
         ...emptyTargeting(),
-        audienceTags: [
-          { tag: 'highProtein', priority: 'high' },
-
-        ],
+        audienceTags: [{ tag: 'highProtein', priority: 'high' }],
         dietary: [{ pref: 'pescatarian', priority: 'medium' }],
         foodInterests: [{ name: 'Grilled Salmon', priority: 'high' }],
         cuisineInterests: [{ name: 'American', priority: 'medium' }],
@@ -386,10 +382,7 @@ export function buildSeedState(): AppState {
       'https://uplate.app/order/tofu-buddha-bowl',
       {
         ...emptyTargeting(),
-        audienceTags: [
-
-          { tag: 'lowCalorie', priority: 'low' },
-        ],
+        audienceTags: [{ tag: 'lowCalorie', priority: 'low' }],
         dietary: [
           { pref: 'vegan', priority: 'required' },
           { pref: 'vegetarian', priority: 'medium' },
@@ -508,10 +501,7 @@ export function buildSeedState(): AppState {
       'https://uplate.app/order/oat-builder',
       {
         ...emptyTargeting(),
-        audienceTags: [
-
-          { tag: 'lowCalorie', priority: 'high' },
-        ],
+        audienceTags: [{ tag: 'lowCalorie', priority: 'high' }],
         foodInterests: [{ name: 'Oat Bowl', priority: 'high' }],
         cuisineInterests: [{ name: 'American', priority: 'low' }],
         time: { range: { startHour: 7, endHour: 11 }, days: ['mon', 'tue', 'wed', 'thu', 'fri'] },
