@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>UPlate</title>
+    <script>
+      // GitHub Pages has no rewrite rule for client-side routes. Save the
+      // requested URL, then return to the app shell where index.html restores it.
+      (function () {
+        sessionStorage.setItem(
+          'uplate-spa-redirect',
+          window.location.pathname + window.location.search + window.location.hash,
+        );
+        window.location.replace('/');
+      })();
+    </script>
+  </head>
+  <body></body>
+</html>
