@@ -7,6 +7,7 @@ import { ActionMenu } from '../ui/ActionMenu';
 import { Badge } from '../ui/Badge';
 import { formatDateRange, formatRelativeTime } from '../../lib/format';
 import type { Campaign } from '../../types';
+import { appPath } from '../../lib/demo';
 
 interface CampaignHeaderProps {
   campaign: Campaign;
@@ -44,14 +45,14 @@ export function CampaignHeader({
         campaign={campaign}
         onCancel={onCancelEdit}
         onSubmit={onSubmitEdit}
-        onBack={() => navigate('/campaigns')}
+        onBack={() => navigate(appPath('/campaigns'))}
       />
     );
   }
 
   return (
     <header className="uplate-campaign-header">
-      <Link to="/campaigns" className="uplate-campaign-header__back">
+      <Link to={appPath('/campaigns')} className="uplate-campaign-header__back">
         <ChevronLeft size={14} strokeWidth={2} />
         <span>Campaigns</span>
       </Link>

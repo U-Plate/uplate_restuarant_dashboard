@@ -10,6 +10,7 @@ import { AdPreview } from '../components/ad/AdPreview';
 import { TargetingBuilder } from '../components/targeting/TargetingBuilder';
 import { useApp } from '../store/AppContext';
 import { emptyTargeting } from '../lib/clone';
+import { appPath } from '../lib/demo';
 
 interface Draft {
   title: string;
@@ -39,7 +40,7 @@ export default function AdCreate() {
 
   const campaign = id ? state.campaigns[id] : undefined;
   const backState = (location.state as { from?: string } | null)?.from;
-  const backTo = backState ?? (campaign ? `/campaigns/${campaign.id}` : '/campaigns');
+  const backTo = backState ?? appPath(campaign ? `/campaigns/${campaign.id}` : '/campaigns');
 
   const [draft, setDraft] = useState<Draft>(INITIAL_DRAFT);
   const [submitting, setSubmitting] = useState(false);
@@ -84,7 +85,7 @@ export default function AdCreate() {
           It may have been deleted, or the link is wrong.
         </p>
         <div>
-          <Button onClick={() => navigate('/campaigns')}>Back to campaigns</Button>
+          <Button onClick={() => navigate(appPath('/campaigns'))}>Back to campaigns</Button>
         </div>
       </div>
     );
@@ -107,7 +108,7 @@ export default function AdCreate() {
         location: draft.location,
         targeting: draft.targeting,
       });
-      navigate(`/campaigns/${campaign.id}/ads/${ad.id}`, { replace: true });
+      navigate(appPath(`/campaigns/${campaign.id}/ads/${ad.id}`), { replace: true });
     } catch {
       setSubmitting(false);
     }

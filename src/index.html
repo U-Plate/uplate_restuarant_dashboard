@@ -7,11 +7,21 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..600;1,9..144,400..500&family=Inter:wght@400;500;600;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
     <title>UPlate · Restaurant Dashboard</title>
     <script>
+      // GitHub Pages serves 404.html for direct SPA routes. Restore the
+      // requested URL before React's BrowserRouter starts routing.
+      (function () {
+        var redirect = sessionStorage.getItem('uplate-spa-redirect');
+        if (redirect) {
+          sessionStorage.removeItem('uplate-spa-redirect');
+          window.history.replaceState(null, '', redirect);
+        }
+      })();
+
       // Set the moss surface before React mounts so unauth'd routes don't
       // flash cream. Toggled by AuthGate after auth state resolves.
       (function () {

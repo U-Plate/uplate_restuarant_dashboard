@@ -13,6 +13,7 @@ import { ActionMenu } from '../ui/ActionMenu';
 import { AdPreview } from './AdPreview';
 import type { Ad } from '../../types';
 import { useApp } from '../../store/AppContext';
+import { appPath, withoutDemoPrefix } from '../../lib/demo';
 import { formatNumber, formatPercent } from '../../lib/format';
 import { singleAdWindow } from '../../lib/verdict';
 import { AD_LOCATION_LABEL } from '../../data/constants';
@@ -40,16 +41,16 @@ export function AdCard({
   const campaign = state.campaigns[ad.campaignId];
   const isActive = ad.status === 'active';
   const win = singleAdWindow(state, ad.id);
-  const inAdsLibrary = location.pathname === '/ads';
+  const inAdsLibrary = withoutDemoPrefix(location.pathname) === '/ads';
 
   const openAd = () =>
-    navigate(`/campaigns/${ad.campaignId}/ads/${ad.id}`, {
+    navigate(appPath(`/campaigns/${ad.campaignId}/ads/${ad.id}`), {
       state: { from: location.pathname + location.search },
     });
 
   const handleDuplicateHere = async () => {
     const clone = await commands.duplicateAd(ad.id, ad.campaignId);
-    navigate(`/campaigns/${ad.campaignId}/ads/${clone.id}`, {
+    navigate(appPath(`/campaigns/${ad.campaignId}/ads/${clone.id}`), {
       state: { from: location.pathname + location.search },
     });
   };

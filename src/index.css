@@ -192,9 +192,7 @@ input, textarea, select, button {
 
 /* ---------- Sidebar (desktop rail + mobile drawer body) --------------- */
 
-/* Brand zone: a small editorial masthead. The UPlate wordmark is the one
- * place the Fraunces display voice enters the chrome (it carries the auth
- * surface's identity inward); everything below it stays Inter and quiet. */
+/* Brand zone: a small editorial masthead. */
 .uplate-sidebar__brand {
   display: flex;
   flex-direction: column;
@@ -211,8 +209,6 @@ input, textarea, select, button {
 
 .uplate-sidebar__wordmark {
   font-family: var(--font-display);
-  font-optical-sizing: auto;
-  font-variation-settings: 'opsz' 72;
   font-weight: 500;
   font-size: 1.375rem;
   line-height: 1.04;

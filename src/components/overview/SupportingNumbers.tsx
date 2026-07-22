@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import { ArrowDownRight, ArrowUpRight, Minus } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Sparkline } from '../charts/Sparkline';
+import { appPath } from '../../lib/demo';
 
 export interface SupportingNumber {
   label: string;
@@ -59,7 +60,7 @@ function NumberCell({ number, divider }: { number: SupportingNumber; divider: bo
   const sparkColor = toneToColor(number.tone);
   return (
     <Link
-      to={number.to}
+      to={appPath(number.to)}
       style={{
         display: 'grid',
         gridTemplateColumns: '1fr auto',

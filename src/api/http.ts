@@ -131,6 +131,7 @@ export function createHttpClient(opts: HttpClientOptions): ApiClient {
       audienceInsights: () => request('GET', '/analytics/audience-insights'),
       clickSignals: (adId) =>
         request('GET', `/analytics/ads/${encodeURIComponent(adId)}/click-signals`),
+      restaurantInsights: () => request('GET', '/analytics/restaurant-insights'),
     },
   };
 }

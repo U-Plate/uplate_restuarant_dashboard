@@ -16,6 +16,7 @@ import { ClickAudienceSignals } from '../components/ad/ClickAudienceSignals';
 import { DuplicateAdDialog } from '../components/ad/DuplicateAdDialog';
 import { useApp } from '../store/AppContext';
 import { computeAdVerdict } from '../lib/verdict';
+import { appPath, withoutDemoPrefix } from '../lib/demo';
 
 interface Draft {
   title: string;
@@ -45,8 +46,8 @@ export default function AdDetail() {
 
   // Back-link target preserves the upstream surface.
   const backState = (location.state as { from?: string } | null)?.from;
-  const cameFromLibrary = backState?.startsWith('/ads');
-  const backTo = cameFromLibrary ? '/ads' : `/campaigns/${id}`;
+  const cameFromLibrary = withoutDemoPrefix(backState ?? '').startsWith('/ads');
+  const backTo = appPath(cameFromLibrary ? '/ads' : `/campaigns/${id}`);
   const backLabel = cameFromLibrary ? 'Ads' : campaign?.name ?? 'Campaign';
 
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -88,7 +89,7 @@ export default function AdDetail() {
   );
 
   if (!ad || !campaign) {
-    return <NotFound onBack={() => navigate('/campaigns')} />;
+    return <NotFound onBack={() => navigate(appPath('/campaigns'))} />;
   }
 
   const exitEdit = () => {
@@ -242,7 +243,7 @@ export default function AdDetail() {
         onConfirm={() => {
           void commands.deleteAd(ad.id);
           setConfirmDelete(false);
-          navigate(`/campaigns/${campaign.id}`);
+          navigate(appPath(`/campaigns/${campaign.id}`));
         }}
       />
 

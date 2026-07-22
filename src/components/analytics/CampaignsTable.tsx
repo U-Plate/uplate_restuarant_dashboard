@@ -14,6 +14,7 @@ import { ActionMenu } from '../ui/ActionMenu';
 import { Sparkline } from '../charts/Sparkline';
 import type { Campaign } from '../../types';
 import { useApp } from '../../store/AppContext';
+import { appPath } from '../../lib/demo';
 import {
   adsForCampaign,
   aggregateSeries,
@@ -99,7 +100,7 @@ export function CampaignsTable({ range, onDeleteRequest }: CampaignsTableProps) 
 
   const handleDuplicate = async (c: Campaign) => {
     const created = await commands.duplicateCampaign(c.id);
-    navigate(`/campaigns/${created.id}`);
+    navigate(appPath(`/campaigns/${created.id}`));
   };
 
   return (
@@ -240,13 +241,13 @@ function CampaignRow({
       role="row"
       onClick={(e) => {
         if ((e.target as HTMLElement).closest('[data-action]')) return;
-        navigate(`/campaigns/${campaign.id}`);
+        navigate(appPath(`/campaigns/${campaign.id}`));
       }}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           if ((e.target as HTMLElement).closest('[data-action]')) return;
           e.preventDefault();
-          navigate(`/campaigns/${campaign.id}`);
+          navigate(appPath(`/campaigns/${campaign.id}`));
         }
       }}
       tabIndex={0}
@@ -272,7 +273,7 @@ function CampaignRow({
       <div role="cell" className="uplate-camps-table__c-name">
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
           <Link
-            to={`/campaigns/${campaign.id}`}
+            to={appPath(`/campaigns/${campaign.id}`)}
             onClick={(e) => e.stopPropagation()}
             style={{
               fontFamily: 'var(--font-ui)',
@@ -338,11 +339,11 @@ function CampaignRow({
       <div role="cell" className="uplate-camps-table__c-actions" data-action>
         <ActionMenu
           items={[
-            { label: 'View', icon: <Eye size={14} />, onClick: () => navigate(`/campaigns/${campaign.id}`) },
+              { label: 'View', icon: <Eye size={14} />, onClick: () => navigate(appPath(`/campaigns/${campaign.id}`)) },
             {
               label: 'Edit',
               icon: <Pencil size={14} />,
-              onClick: () => navigate(`/campaigns/${campaign.id}?edit=1`),
+              onClick: () => navigate(appPath(`/campaigns/${campaign.id}?edit=1`)),
             },
             {
               label: isActive ? 'Pause' : 'Activate',

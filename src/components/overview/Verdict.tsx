@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import type { Verdict as VerdictData } from '../../lib/verdict';
+import { appPath } from '../../lib/demo';
 
 interface VerdictProps {
   verdict: VerdictData;
@@ -62,7 +63,7 @@ export function Verdict({ verdict, cta }: VerdictProps) {
       {cta && (
         <div style={{ marginTop: 'var(--s-3)' }}>
           <Link
-            to={cta.to}
+            to={appPath(cta.to)}
             style={{
               display: 'inline-flex',
               alignItems: 'center',
@@ -95,7 +96,7 @@ function SupportText({ verdict }: { verdict: VerdictData }) {
     <>
       {before}
       <Link
-        to={verdict.link.to}
+        to={appPath(verdict.link.to)}
         style={{
           color: 'var(--ink)',
           textDecoration: 'underline',

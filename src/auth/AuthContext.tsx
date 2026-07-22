@@ -32,6 +32,7 @@ interface AuthContextValue {
   signUp(email: string, password: string, accessCode: string): Promise<void>;
   signOut(message?: string): Promise<void>;
   clearError(): void;
+  isDemo: boolean;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -55,11 +56,17 @@ function describeFirebaseError(err: unknown, fallback: string): string {
   return fallback;
 }
 
-export function AuthProvider({ children }: { children: ReactNode }) {
-  const [phase, setPhase] = useState<AuthPhase>('loading');
-  const [user, setUser] = useState<User | null>(null);
-  const [restaurantId, setRestaurantId] = useState<string | null>(null);
-  const [restaurant, setRestaurant] = useState<RestaurantProfile | null>(null);
+const DEMO_USER = { email: 'demo@uplate.app' } as User;
+const DEMO_RESTAURANT: RestaurantProfile = {
+  id: 'demo', name: 'Boiler Bowl Co.', notifications: { weekly: true, emailAlerts: true }, createdAt: '', updatedAt: '',
+};
+
+export function AuthProvider({ children, demo = false }: { children: ReactNode; demo?: boolean }) {
+  const isDemo = demo;
+  const [phase, setPhase] = useState<AuthPhase>(() => isDemo ? 'signed-in' : 'loading');
+  const [user, setUser] = useState<User | null>(() => isDemo ? DEMO_USER : null);
+  const [restaurantId, setRestaurantId] = useState<string | null>(() => isDemo ? 'demo' : null);
+  const [restaurant, setRestaurant] = useState<RestaurantProfile | null>(() => isDemo ? DEMO_RESTAURANT : null);
   const [error, setError] = useState<string | null>(null);
 
   // Skip resolving the session for a single Firebase auth-state change — used
@@ -95,6 +102,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    if (isDemo) return;
     const unsub = onAuthStateChanged(auth, async (nextUser) => {
       setUser(nextUser);
       if (!nextUser) {
@@ -111,9 +119,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await resolveSession(nextUser);
     });
     return () => unsub();
-  }, [resolveSession]);
+  }, [isDemo, resolveSession]);
 
   const signIn = useCallback(async (email: string, password: string) => {
+    if (isDemo) return;
     setError(null);
     setPhase('loading');
     try {
@@ -124,10 +133,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setError(describeFirebaseError(err, 'Sign in failed.'));
       throw err;
     }
-  }, []);
+  }, [isDemo]);
 
   const signUp = useCallback(
     async (email: string, password: string, accessCode: string) => {
+      if (isDemo) return;
       setError(null);
       setPhase('loading');
 
@@ -183,17 +193,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         throw err;
       }
     },
-    [],
+    [isDemo],
   );
 
   const signOut = useCallback(async (message?: string) => {
+    if (isDemo) return;
     await firebaseSignOut(auth);
     setRestaurantId(null);
     setRestaurant(null);
     setUser(null);
     setPhase('signed-out');
     setError(message ?? null);
-  }, []);
+  }, [isDemo]);
 
   const clearError = useCallback(() => setError(null), []);
 
@@ -208,8 +219,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signUp,
       signOut,
       clearError,
+      isDemo,
     }),
-    [phase, user, restaurantId, restaurant, error, signIn, signUp, signOut, clearError],
+    [phase, user, restaurantId, restaurant, error, signIn, signUp, signOut, clearError, isDemo],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

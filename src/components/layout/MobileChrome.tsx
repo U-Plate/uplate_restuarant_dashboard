@@ -11,6 +11,7 @@ import {
 import type { ReactNode } from 'react';
 import { useAuth } from '../../auth/AuthContext';
 import { SidebarBody } from './Sidebar';
+import { appPath } from '../../lib/demo';
 
 interface MobileChromeProps {
   /** Render slot for things that belong in the topbar between the menu and the identity (e.g. a "back" link). */
@@ -169,9 +170,9 @@ function BottomTabBar({ onMoreClick }: BottomTabBarProps) {
       className="uplate-mobile-tabbar"
       aria-label="Quick navigation"
     >
-      <TabLink to="/" end label="Dashboard" icon={<LayoutDashboard size={20} strokeWidth={1.75} />} />
-      <TabLink to="/campaigns" label="Campaigns" icon={<Megaphone size={20} strokeWidth={1.75} />} />
-      <TabLink to="/ads" label="Ads" icon={<ImageIcon size={20} strokeWidth={1.75} />} />
+      <TabLink to={appPath('/')} end label="Dashboard" icon={<LayoutDashboard size={20} strokeWidth={1.75} />} />
+      <TabLink to={appPath('/campaigns')} label="Campaigns" icon={<Megaphone size={20} strokeWidth={1.75} />} />
+      <TabLink to={appPath('/ads')} label="Ads" icon={<ImageIcon size={20} strokeWidth={1.75} />} />
       <button
         type="button"
         onClick={onMoreClick}

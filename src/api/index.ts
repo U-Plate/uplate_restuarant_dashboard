@@ -18,6 +18,7 @@ import { auth as firebaseAuth } from '../firebase/config';
 import type { ApiClient } from './client';
 import { createHttpClient } from './http';
 import { createLocalClient } from './local';
+import { isDemoMode } from '../lib/demo';
 
 export type { ApiClient } from './client';
 export * from './types';
@@ -28,10 +29,17 @@ const baseUrl =
     : '';
 
 let _client: ApiClient | null = null;
+let _clientMode: 'demo' | 'configured' | 'local' | null = null;
 
 export function getApiClient(): ApiClient {
-  if (_client) return _client;
-  _client = baseUrl
+  const mode = isDemoMode() ? 'demo' : baseUrl ? 'configured' : 'local';
+  if (_client && _clientMode === mode) return _client;
+  // `/demo` deliberately never reaches the configured backend. Its local
+  // client is seeded in memory, so demo edits disappear on refresh and cannot
+  // affect a real restaurant account.
+  _client = isDemoMode()
+    ? createLocalClient()
+    : baseUrl
     ? createHttpClient({
         baseUrl,
         getAuthToken: async () => {
@@ -45,6 +53,7 @@ export function getApiClient(): ApiClient {
         },
       })
     : createLocalClient();
+  _clientMode = mode;
   return _client;
 }
 

@@ -23,6 +23,7 @@ export default defineConfig({
       input: {
         index: resolve(root, 'index.html'),
 
+
       },
     },
   },

@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import { ChevronRight } from 'lucide-react';
 import type { Campaign } from '../../types';
 import { formatRelativeTime } from '../../lib/format';
+import { appPath } from '../../lib/demo';
 
 interface RecentCampaignsProps {
   campaigns: Campaign[];
@@ -26,7 +27,7 @@ export function RecentCampaigns({ campaigns }: RecentCampaignsProps) {
           Recent campaigns
         </h2>
         <Link
-          to="/campaigns"
+          to={appPath('/campaigns')}
           style={{
             fontSize: 'var(--type-meta)',
             color: 'var(--ink-2)',
@@ -66,7 +67,7 @@ function Row({ campaign }: { campaign: Campaign }) {
   const isActive = campaign.status === 'active';
   return (
     <Link
-      to={`/campaigns/${campaign.id}`}
+      to={appPath(`/campaigns/${campaign.id}`)}
       style={{
         display: 'grid',
         gridTemplateColumns: 'auto 1fr auto',

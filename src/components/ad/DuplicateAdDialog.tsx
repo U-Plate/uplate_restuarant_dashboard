@@ -5,6 +5,7 @@ import { Button } from '../ui/Button';
 import { SelectField } from '../ui/Field';
 import type { Ad } from '../../types';
 import { useApp } from '../../store/AppContext';
+import { appPath } from '../../lib/demo';
 import { campaignsInOrder } from '../../store/selectors';
 
 interface DuplicateAdDialogProps {
@@ -28,7 +29,7 @@ export function DuplicateAdDialog({ open, ad, onClose }: DuplicateAdDialogProps)
   const handleSubmit = async () => {
     const clone = await commands.duplicateAd(ad.id, target);
     onClose();
-    navigate(`/campaigns/${target}/ads/${clone.id}`);
+    navigate(appPath(`/campaigns/${target}/ads/${clone.id}`));
   };
 
   return (

@@ -7,6 +7,7 @@ import { CampaignCard } from '../components/campaign/CampaignCard';
 import { CampaignForm } from '../components/campaign/CampaignForm';
 import { BrowseChrome } from '../components/layout/BrowseChrome';
 import { useApp } from '../store/AppContext';
+import { appPath } from '../lib/demo';
 import { campaignsInOrder } from '../store/selectors';
 import { campaignWindow } from '../lib/verdict';
 import type { Campaign } from '../types';
@@ -97,7 +98,7 @@ export default function CampaignsPage() {
           onSubmit={async (data) => {
             const c = await commands.createCampaign(data);
             setShowForm(false);
-            navigate(`/campaigns/${c.id}`);
+            navigate(appPath(`/campaigns/${c.id}`));
           }}
         />
       </>
@@ -144,7 +145,7 @@ export default function CampaignsPage() {
         onSubmit={async (data) => {
           const c = await commands.createCampaign(data);
           setShowForm(false);
-          navigate(`/campaigns/${c.id}`);
+          navigate(appPath(`/campaigns/${c.id}`));
         }}
       />
 

@@ -16,6 +16,7 @@ import {
 import type { ReactNode } from 'react';
 import type { Ad } from '../../types';
 import { useApp } from '../../store/AppContext';
+import { appPath } from '../../lib/demo';
 import { formatNumber, formatPercent } from '../../lib/format';
 import { describeTargeting } from '../../lib/targeting';
 import { adWindowMetrics, type AdWindowMetrics } from '../../lib/verdict';
@@ -236,14 +237,14 @@ function AdRow({
   const targetingSummary = describeTargeting(ad.targeting);
 
   const openAd = () => {
-    navigate(`/campaigns/${campaignId}/ads/${ad.id}`, {
+    navigate(appPath(`/campaigns/${campaignId}/ads/${ad.id}`), {
       state: { from: location.pathname + location.search },
     });
   };
 
   const handleDuplicateHere = async () => {
     const clone = await commands.duplicateAd(ad.id, campaignId);
-    navigate(`/campaigns/${campaignId}/ads/${clone.id}`, {
+    navigate(appPath(`/campaigns/${campaignId}/ads/${clone.id}`), {
       state: { from: location.pathname + location.search },
     });
   };

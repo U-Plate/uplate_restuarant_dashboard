@@ -33,9 +33,11 @@ import type {
   DuplicateAdResponse,
   DuplicateCampaignRequest,
   DuplicateCampaignResponse,
+  InsightMenuItemRow,
   RegisterRequest,
   RegisterResponse,
 
+  RestaurantInsightsResponse,
   RestaurantPatch,
   RestaurantProfile,
   SetStatusRequest,
@@ -47,16 +49,33 @@ import type {
 import { ApiError } from './types';
 import type { AdEvent, AppState, Targeting } from '../types';
 import { buildSeedState, metricsFromEvents } from '../data/mockData';
+import { buildRestaurantInsightSeed } from '../data/restaurantInsightsMockData';
 import { cloneAd, cloneCampaign, emptyTargeting, newAdSkeleton, newCampaignSkeleton } from '../lib/clone';
 import { AUDIENCE_LABEL, DIETARY_LABEL, DEMO_SCHOOL_ID } from '../data/constants';
+import { HEALTH_GOAL_LABEL, ageBucket, titleCase as titleCaseWords } from '../lib/insights';
+
+// Generated once per session (module scope), then aggregated fresh on every
+// `restaurantInsights()` call — same "real math over seeded events" posture
+// as the rest of this file's analytics endpoints.
+const RESTAURANT_INSIGHT_SEED = buildRestaurantInsightSeed();
 
 const STORAGE_KEY = 'uplate-dashboard-v2';
+let demoState: AppState | null = null;
+
+function isDemoRequest(): boolean {
+  return typeof window !== 'undefined'
+    && (window.location.pathname === '/demo' || window.location.pathname.startsWith('/demo/'));
+}
 
 function nowIso(): string {
   return new Date().toISOString();
 }
 
 function load(): AppState {
+  if (isDemoRequest()) {
+    demoState ??= buildSeedState();
+    return demoState;
+  }
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
@@ -88,6 +107,10 @@ function load(): AppState {
 }
 
 function save(state: AppState): void {
+  if (isDemoRequest()) {
+    demoState = state;
+    return;
+  }
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   } catch {
@@ -276,6 +299,233 @@ function aggregateAdEngagement(state: AppState): AudienceEngagement {
     recurringPct: safeDivide(recurringClicks),
     contributingAdCount: contributingAds.size,
   };
+}
+
+// Organic (non-ad) restaurant performance. Aggregates the seeded consumer-app
+// event stream from restaurantInsightsMockData.ts the same way the ads
+// analytics above aggregate ad_events: real GROUP BY-style math, one section
+// at a time so each can degrade to its own honest empty state.
+function computeRestaurantInsights(): RestaurantInsightsResponse {
+  const seed = RESTAURANT_INSIGHT_SEED;
+  const DAY_MS = 86_400_000;
+  const nowMs = Date.now();
+  const daysSince = (iso: string) => Math.floor((nowMs - new Date(iso).getTime()) / DAY_MS);
+  const inWindow = (iso: string, minDays: number, maxDays: number) => {
+    const d = daysSince(iso);
+    return d >= minDays && d < maxDays;
+  };
+  const dateOf = (iso: string) => iso.slice(0, 10);
+  const monIndexedDow = (iso: string) => (new Date(iso).getDay() + 6) % 7;
+
+  // ---- visitor-level facts shared across sections ----
+  const daysByVisitor = new Map<string, Set<string>>();
+  for (const v of seed.views) {
+    const set = daysByVisitor.get(v.userId) ?? new Set<string>();
+    set.add(dateOf(v.occurredAt));
+    daysByVisitor.set(v.userId, set);
+  }
+  const visitorCount = seed.visitors.size;
+  const repeatVisitors = [...daysByVisitor.values()].filter((s) => s.size >= 2).length;
+  const repeatVisitorPct = visitorCount === 0 ? 0 : repeatVisitors / visitorCount;
+  const newVisitorPct = visitorCount === 0 ? 0 : (visitorCount - repeatVisitors) / visitorCount;
+
+  // ---- hero ----
+  const totalViews = seed.views.length;
+  const totalLogged = seed.mealLogs.length;
+  const ratingCount = seed.ratings.length;
+  const avgRating = ratingCount === 0 ? 0 : seed.ratings.reduce((s, r) => s + r.rating, 0) / ratingCount;
+  const last7Views = seed.views.filter((v) => inWindow(v.occurredAt, 0, 7)).length;
+  const prior7Views = seed.views.filter((v) => inWindow(v.occurredAt, 7, 14)).length;
+  const viewsDelta = prior7Views === 0 ? null : (last7Views - prior7Views) / prior7Views;
+
+  const hero: RestaurantInsightsResponse['hero'] = {
+    views: totalViews,
+    viewsDelta,
+    loggedMeals: totalLogged,
+    avgRating,
+    ratingCount,
+    repeatVisitorPct,
+    visitorCount,
+  };
+
+  // ---- traffic ----
+  // Most restaurant-page opens are a student logging a meal they already
+  // ate, not browsing to decide where to eat — so this deliberately doesn't
+  // report a discovery source mix (search/retail/ad); that framing implied a
+  // "how are we winning customers" story this data can't support yet.
+  const seriesByDate = new Map<string, number>();
+  const heatmapCells = Array.from({ length: 7 * 24 }, () => 0);
+  for (const v of seed.views) {
+    const date = dateOf(v.occurredAt);
+    seriesByDate.set(date, (seriesByDate.get(date) ?? 0) + 1);
+    const hour = new Date(v.occurredAt).getHours();
+    heatmapCells[monIndexedDow(v.occurredAt) * 24 + hour] += 1;
+  }
+  const series = [...seriesByDate.entries()]
+    .map(([date, views]) => ({ date, views }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  const traffic: RestaurantInsightsResponse['traffic'] = {
+    series,
+    heatmap: { cells: heatmapCells, max: Math.max(1, ...heatmapCells) },
+    newVisitorPct,
+    repeatVisitorPct,
+  };
+
+  // ---- menu performance ----
+  interface ItemAgg {
+    views: number;
+    logs: number;
+    ratingSum: number;
+    ratingCount: number;
+    views7: number;
+    viewsPrior7: number;
+  }
+  const itemAgg = new Map<string, ItemAgg>();
+  const forItem = (id: string): ItemAgg => {
+    let agg = itemAgg.get(id);
+    if (!agg) {
+      agg = { views: 0, logs: 0, ratingSum: 0, ratingCount: 0, views7: 0, viewsPrior7: 0 };
+      itemAgg.set(id, agg);
+    }
+    return agg;
+  };
+  for (const iv of seed.itemViews) {
+    const agg = forItem(iv.menuItemId);
+    agg.views += 1;
+    if (inWindow(iv.occurredAt, 0, 7)) agg.views7 += 1;
+    if (inWindow(iv.occurredAt, 7, 14)) agg.viewsPrior7 += 1;
+  }
+  for (const ml of seed.mealLogs) forItem(ml.menuItemId).logs += 1;
+  for (const r of seed.ratings) {
+    const agg = forItem(r.menuItemId);
+    agg.ratingSum += r.rating;
+    agg.ratingCount += 1;
+  }
+
+  const menuItemRows = seed.menuItems.map((mi) => {
+    const agg = itemAgg.get(mi.id) ?? { views: 0, logs: 0, ratingSum: 0, ratingCount: 0, views7: 0, viewsPrior7: 0 };
+    return {
+      menuItemId: mi.id,
+      name: mi.name,
+      views: agg.views,
+      logs: agg.logs,
+      avgRating: agg.ratingCount === 0 ? 0 : agg.ratingSum / agg.ratingCount,
+      ratingCount: agg.ratingCount,
+      views7: agg.views7,
+      viewsPrior7: agg.viewsPrior7,
+    };
+  });
+
+  const toRow = (r: (typeof menuItemRows)[number]): InsightMenuItemRow => ({
+    menuItemId: r.menuItemId,
+    name: r.name,
+    views: r.views,
+    logs: r.logs,
+    avgRating: r.avgRating,
+    ratingCount: r.ratingCount,
+  });
+
+  const topItems = [...menuItemRows]
+    .filter((r) => r.views > 0)
+    .sort((a, b) => b.views - a.views)
+    .slice(0, 6)
+    .map(toRow);
+
+  const underperformingItems = [...menuItemRows]
+    .filter((r) => r.views >= 5)
+    .map((r) => ({ ...r, logRate: r.logs / r.views }))
+    .sort((a, b) => a.logRate - b.logRate)
+    .slice(0, 3)
+    .map(toRow);
+
+  const trending = menuItemRows
+    .filter((r) => r.viewsPrior7 > 0)
+    .map((r) => ({
+      menuItemId: r.menuItemId,
+      name: r.name,
+      changePct: (r.views7 - r.viewsPrior7) / r.viewsPrior7,
+    }))
+    .sort((a, b) => b.changePct - a.changePct)
+    .slice(0, 3);
+
+  const menuViewsCount = seed.menuViews.length;
+  const menu: RestaurantInsightsResponse['menu'] = {
+    menuViews: menuViewsCount,
+    menuViewRate: totalViews === 0 ? 0 : menuViewsCount / totalViews,
+    topItems,
+    underperformingItems,
+    trending,
+  };
+
+  // ---- ratings ----
+  const ratingByDate = new Map<string, { sum: number; count: number }>();
+  for (const r of seed.ratings) {
+    const date = dateOf(r.occurredAt);
+    const cur = ratingByDate.get(date) ?? { sum: 0, count: 0 };
+    cur.sum += r.rating;
+    cur.count += 1;
+    ratingByDate.set(date, cur);
+  }
+  const ratingTrend = [...ratingByDate.entries()]
+    .map(([date, { sum, count }]) => ({ date, average: sum / count }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+  const lowestRated = [...menuItemRows]
+    .filter((r) => r.ratingCount >= 3)
+    .sort((a, b) => a.avgRating - b.avgRating)
+    .slice(0, 3)
+    .map(toRow);
+  const ratings: RestaurantInsightsResponse['ratings'] = {
+    average: avgRating,
+    count: ratingCount,
+    trend: ratingTrend,
+    lowestRated,
+  };
+
+  // ---- customer composition (profile mix among actual viewers) ----
+  const ageBucketCounts = new Map<string, number>();
+  const dietaryCounts = new Map<string, number>();
+  const healthGoalCounts = new Map<string, number>();
+  const cuisineCounts = new Map<string, number>();
+  for (const visitor of seed.visitors.values()) {
+    const bucket = ageBucket(visitor.age);
+    ageBucketCounts.set(bucket, (ageBucketCounts.get(bucket) ?? 0) + 1);
+    if (visitor.dietary) dietaryCounts.set(visitor.dietary, (dietaryCounts.get(visitor.dietary) ?? 0) + 1);
+    healthGoalCounts.set(visitor.healthGoal, (healthGoalCounts.get(visitor.healthGoal) ?? 0) + 1);
+    for (const cuisine of visitor.cuisines) {
+      const key = cuisine.toLowerCase();
+      cuisineCounts.set(key, (cuisineCounts.get(key) ?? 0) + 1);
+    }
+  }
+  const pctOfVisitors = (n: number) => (visitorCount === 0 ? 0 : n / visitorCount);
+  const composition: RestaurantInsightsResponse['composition'] = {
+    visitorCount,
+    ageBuckets: (['18–19', '20–21', '22–23', '24+'] as const).map((bucket) => ({
+      key: bucket,
+      label: bucket,
+      pct: pctOfVisitors(ageBucketCounts.get(bucket) ?? 0),
+    })),
+    dietary: [...dietaryCounts.entries()]
+      .map(([key, count]) => ({
+        key,
+        label: DIETARY_LABEL[key as keyof typeof DIETARY_LABEL] ?? key,
+        pct: pctOfVisitors(count),
+      }))
+      .sort((a, b) => b.pct - a.pct),
+    healthGoal: [...healthGoalCounts.entries()]
+      .map(([key, count]) => ({
+        key,
+        label: HEALTH_GOAL_LABEL[key as keyof typeof HEALTH_GOAL_LABEL] ?? key,
+        pct: pctOfVisitors(count),
+      }))
+      .sort((a, b) => b.pct - a.pct),
+    cuisine: [...cuisineCounts.entries()]
+      .map(([key, count]) => ({ key, label: titleCaseWords(key), pct: pctOfVisitors(count) }))
+      .sort((a, b) => b.pct - a.pct)
+      .slice(0, 6),
+  };
+
+  return { hero, traffic, menu, ratings, composition };
 }
 
 function toRestaurantProfile(state: AppState): RestaurantProfile {
@@ -571,6 +821,7 @@ export function createLocalClient(): ApiClient {
           ...existing,
           ...input,
           iconUrl: input.iconUrl ?? existing.iconUrl,
+          ctaText: input.ctaText ?? existing.ctaText,
           campaignId: input.campaignId ?? existing.campaignId,
           updatedAt: nowIso(),
         };
@@ -932,6 +1183,10 @@ export function createLocalClient(): ApiClient {
           clicksByHour,
           peakHour: peakHour < 0 ? 0 : peakHour,
         };
+      },
+
+      restaurantInsights: async (): Promise<RestaurantInsightsResponse> => {
+        return computeRestaurantInsights();
       },
     },
   };

@@ -5,11 +5,13 @@ import {
   Image as ImageIcon,
   LineChart,
   Users,
+  Utensils,
   Settings,
   LogOut,
 } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useAuth } from '../../auth/AuthContext';
+import { appPath, withoutDemoPrefix } from '../../lib/demo';
 
 interface NavItem {
   to: string;
@@ -24,6 +26,7 @@ const NAV: NavItem[] = [
   { to: '/ads', label: 'Ads', icon: <ImageIcon size={17} strokeWidth={1.75} /> },
   { to: '/analytics', label: 'Analytics', icon: <LineChart size={17} strokeWidth={1.75} /> },
   { to: '/audience', label: 'Audience', icon: <Users size={17} strokeWidth={1.75} /> },
+  { to: '/insights', label: 'Insights', icon: <Utensils size={17} strokeWidth={1.75} /> },
   { to: '/settings', label: 'Settings', icon: <Settings size={17} strokeWidth={1.75} /> },
 ];
 
@@ -41,12 +44,12 @@ interface SidebarBodyProps {
 }
 
 export function SidebarBody({ onNavigate }: SidebarBodyProps) {
-  const { restaurant, user, signOut } = useAuth();
+  const { restaurant, user, signOut, isDemo } = useAuth();
   const location = useLocation();
-  const { pathname } = location;
+  const pathname = withoutDemoPrefix(location.pathname);
   const fromState = (location.state as { from?: string } | null)?.from;
   const onAdDetail = /^\/campaigns\/[^/]+\/ads\/[^/]+/.test(pathname);
-  const adDetailFromLibrary = onAdDetail && !!fromState?.startsWith('/ads');
+  const adDetailFromLibrary = onAdDetail && withoutDemoPrefix(fromState ?? '').startsWith('/ads');
 
   const isActive = (item: NavItem): boolean => {
     if (item.to === '/ads') return pathname === '/ads' || adDetailFromLibrary;
@@ -82,7 +85,7 @@ export function SidebarBody({ onNavigate }: SidebarBodyProps) {
           return (
             <NavLink
               key={item.to}
-              to={item.to}
+              to={appPath(item.to)}
               onClick={onNavigate}
               aria-current={active ? 'page' : undefined}
               className={`uplate-sidebar__item${active ? ' uplate-sidebar__item--active' : ''}`}
@@ -139,16 +142,18 @@ export function SidebarBody({ onNavigate }: SidebarBodyProps) {
             >
               {user?.email ?? 'Signed in'}
             </span>
-            <span style={{ fontSize: 'var(--type-eyebrow)', color: 'var(--ink-3)' }}>Account</span>
+            <span style={{ fontSize: 'var(--type-eyebrow)', color: 'var(--ink-3)' }}>{isDemo ? 'Demo account' : 'Account'}</span>
           </div>
-          <button
-            type="button"
-            aria-label="Sign out"
-            onClick={() => void signOut()}
-            className="uplate-sidebar__signout"
-          >
-            <LogOut size={16} strokeWidth={1.75} />
-          </button>
+          {!isDemo && (
+            <button
+              type="button"
+              aria-label="Sign out"
+              onClick={() => void signOut()}
+              className="uplate-sidebar__signout"
+            >
+              <LogOut size={16} strokeWidth={1.75} />
+            </button>
+          )}
         </div>
       </div>
     </div>

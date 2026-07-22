@@ -359,6 +359,99 @@ export interface ClickSignalsResponse {
   peakHour: number;
 }
 
+// ---------- Restaurant Insights ----------
+//
+// Organic restaurant performance on the consumer app: menu engagement,
+// logging, ratings, and who's engaging — independent of any ads run. See
+// /restaurant-insights.md for the full data spec this mirrors.
+//
+// Most restaurant-page traffic today is a student logging a meal they
+// already ate, not browsing to decide where to eat — so this DTO
+// deliberately omits discovery-shaped stats (a viewed→logged funnel, search
+// source mix, search demand) that would narrate a "did we win a customer"
+// story the data can't actually support yet. Those can come back wholesale
+// once discovery is a real product surface. Same posture as the ads
+// analytics endpoints above: every number is precomputed server-side from
+// real events, never summed client-side, and every section degrades to its
+// own honest empty state rather than a global gate (a restaurant can have
+// views but no ratings yet, etc).
+
+export interface InsightPoint {
+  date: string;
+  views: number;
+}
+
+export interface InsightHeroStats {
+  views: number;
+  /** Signed share vs. the prior 7-day window; null when there isn't a full prior window to compare against. */
+  viewsDelta: number | null;
+  /** Self-reported meal logs, not verified orders — see restaurant-insights.md §4. */
+  loggedMeals: number;
+  avgRating: number;
+  ratingCount: number;
+  repeatVisitorPct: number;
+  visitorCount: number;
+}
+
+export interface InsightTraffic {
+  series: InsightPoint[];
+  heatmap: { cells: number[]; max: number };
+  newVisitorPct: number;
+  repeatVisitorPct: number;
+}
+
+export interface InsightMenuItemRow {
+  menuItemId: string;
+  name: string;
+  views: number;
+  logs: number;
+  avgRating: number;
+  ratingCount: number;
+}
+
+export interface InsightTrendingItem {
+  menuItemId: string;
+  name: string;
+  changePct: number;
+}
+
+export interface InsightMenuPerformance {
+  menuViews: number;
+  menuViewRate: number;
+  topItems: InsightMenuItemRow[];
+  underperformingItems: InsightMenuItemRow[];
+  trending: InsightTrendingItem[];
+}
+
+export interface InsightRatings {
+  average: number;
+  count: number;
+  trend: Array<{ date: string; average: number }>;
+  lowestRated: InsightMenuItemRow[];
+}
+
+export interface InsightCompositionRow {
+  key: string;
+  label: string;
+  pct: number;
+}
+
+export interface InsightComposition {
+  visitorCount: number;
+  ageBuckets: InsightCompositionRow[];
+  dietary: InsightCompositionRow[];
+  healthGoal: InsightCompositionRow[];
+  cuisine: InsightCompositionRow[];
+}
+
+export interface RestaurantInsightsResponse {
+  hero: InsightHeroStats;
+  traffic: InsightTraffic;
+  menu: InsightMenuPerformance;
+  ratings: InsightRatings;
+  composition: InsightComposition;
+}
+
 // ---------- Errors ----------
 
 export interface ApiErrorBody {

@@ -5,6 +5,7 @@ import { Sparkline } from '../charts/Sparkline';
 import type { Ad } from '../../types';
 import { useApp } from '../../store/AppContext';
 import { formatNumber, formatPercent } from '../../lib/format';
+import { appPath } from '../../lib/demo';
 import type { RangeKey } from '../overview/OverviewChart';
 
 const RANGE_LENS: Record<RangeKey, number | null> = {
@@ -101,8 +102,8 @@ function AdItem({ row, rank }: { row: Row; rank: number }) {
 
   return (
     <Link
-      to={`/campaigns/${row.ad.campaignId}/ads/${row.ad.id}`}
-      state={{ from: '/analytics' }}
+      to={appPath(`/campaigns/${row.ad.campaignId}/ads/${row.ad.id}`)}
+      state={{ from: appPath('/analytics') }}
       style={{
         display: 'grid',
         gridTemplateColumns: '28px minmax(0, 1fr) 96px auto auto 16px',

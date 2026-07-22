@@ -7,6 +7,7 @@ import { AdCard } from '../components/ad/AdCard';
 import { DuplicateAdDialog } from '../components/ad/DuplicateAdDialog';
 import { BrowseChrome } from '../components/layout/BrowseChrome';
 import { useApp } from '../store/AppContext';
+import { appPath } from '../lib/demo';
 import { campaignsInOrder } from '../store/selectors';
 import { singleAdWindow } from '../lib/verdict';
 import type { Ad } from '../types';
@@ -32,7 +33,7 @@ export default function AdsLibrary() {
   const startCreate = () => {
     const first = campaignsInOrder(state)[0];
     if (!first) return;
-    navigate(`/campaigns/${first.id}/ads/new`, {
+    navigate(appPath(`/campaigns/${first.id}/ads/new`), {
       state: { from: location.pathname + location.search },
     });
   };

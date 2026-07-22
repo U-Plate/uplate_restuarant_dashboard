@@ -5,6 +5,7 @@ import { Button } from '../ui/Button';
 import { Toggle } from '../ui/Toggle';
 import { ActionMenu } from '../ui/ActionMenu';
 import { AD_LOCATION_LABEL } from '../../data/constants';
+import { appPath } from '../../lib/demo';
 
 interface AdPageHeaderProps {
   ad: Ad;
@@ -111,7 +112,7 @@ export function AdPageHeader({
         {AD_LOCATION_LABEL[ad.location]}
         <span aria-hidden> · </span>
         in <Link
-          to={`/campaigns/${campaign.id}`}
+          to={appPath(`/campaigns/${campaign.id}`)}
           style={{ color: 'var(--ink-2)', textDecoration: 'none', fontWeight: 500 }}
         >
           {campaign.name}

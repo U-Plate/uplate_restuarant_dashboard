@@ -14,31 +14,54 @@ import AdCreate from './pages/AdCreate';
 import AdsLibrary from './pages/AdsLibrary';
 import Analytics from './pages/Analytics';
 import AudienceInsights from './pages/AudienceInsights';
+import RestaurantInsights from './pages/RestaurantInsights';
 import Settings from './pages/Settings';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <BrowserRouter>
-      <AuthProvider>
-        <AuthGate>
-          <AppProvider>
-            <Routes>
-              <Route element={<App />}>
-                <Route index element={<DashboardOverview />} />
-                <Route path="campaigns" element={<Campaigns />} />
-                <Route path="campaigns/:id" element={<CampaignDetail />} />
-                <Route path="campaigns/:id/ads/new" element={<AdCreate />} />
-                <Route path="campaigns/:id/ads/:adId" element={<AdDetail />} />
-                <Route path="ads" element={<AdsLibrary />} />
-                <Route path="analytics" element={<Analytics />} />
-                <Route path="audience" element={<AudienceInsights />} />
-                <Route path="settings" element={<Settings />} />
-                <Route path="*" element={<Navigate to="/" replace />} />
-              </Route>
-            </Routes>
-          </AppProvider>
-        </AuthGate>
-      </AuthProvider>
+      <Routes>
+        <Route path="demo/*" element={<DemoDashboard />} />
+        <Route path="*" element={<AuthenticatedDashboard />} />
+      </Routes>
     </BrowserRouter>
   </StrictMode>,
 );
+
+export function AuthenticatedDashboard() {
+  return (
+    <AuthProvider>
+      <AuthGate>
+        <AppProvider><DashboardRoutes fallbackPath="/" /></AppProvider>
+      </AuthGate>
+    </AuthProvider>
+  );
+}
+
+export function DemoDashboard() {
+  return (
+    <AuthProvider demo>
+      <AppProvider><DashboardRoutes fallbackPath="/demo" /></AppProvider>
+    </AuthProvider>
+  );
+}
+
+export function DashboardRoutes({ fallbackPath }: { fallbackPath: string }) {
+  return (
+    <Routes>
+      <Route element={<App />}>
+        <Route index element={<DashboardOverview />} />
+        <Route path="campaigns" element={<Campaigns />} />
+        <Route path="campaigns/:id" element={<CampaignDetail />} />
+        <Route path="campaigns/:id/ads/new" element={<AdCreate />} />
+        <Route path="campaigns/:id/ads/:adId" element={<AdDetail />} />
+        <Route path="ads" element={<AdsLibrary />} />
+        <Route path="analytics" element={<Analytics />} />
+        <Route path="audience" element={<AudienceInsights />} />
+        <Route path="insights" element={<RestaurantInsights />} />
+        <Route path="settings" element={<Settings />} />
+        <Route path="*" element={<Navigate to={fallbackPath} replace />} />
+      </Route>
+    </Routes>
+  );
+}

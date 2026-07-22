@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { ChevronRight, Clock, AlertCircle } from 'lucide-react';
 import type { AttentionItem } from '../../lib/attention';
+import { appPath } from '../../lib/demo';
 
 interface WorthALookProps {
   items: AttentionItem[];
@@ -71,7 +72,7 @@ function AttentionRow({ item }: { item: AttentionItem }) {
   const iconColor = item.severity === 'warn' ? 'var(--trend-negative)' : 'var(--ink-3)';
   return (
     <Link
-      to={item.to}
+      to={appPath(item.to)}
       style={{
         display: 'flex',
         alignItems: 'center',

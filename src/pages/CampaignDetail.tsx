@@ -23,6 +23,7 @@ import { CampaignHeader } from '../components/campaign/CampaignHeader';
 import { AdsTable } from '../components/campaign/AdsTable';
 import { DuplicateAdDialog } from '../components/ad/DuplicateAdDialog';
 import type { Ad } from '../types';
+import { appPath } from '../lib/demo';
 
 export default function CampaignDetail() {
   const { id } = useParams();
@@ -36,7 +37,7 @@ export default function CampaignDetail() {
 
   const goToCreateAd = () => {
     if (!id) return;
-    navigate(`/campaigns/${id}/ads/new`, {
+    navigate(appPath(`/campaigns/${id}/ads/new`), {
       state: { from: location.pathname + location.search },
     });
   };
@@ -89,7 +90,7 @@ export default function CampaignDetail() {
           It may have been deleted, or the link is wrong.
         </p>
         <div>
-          <Button onClick={() => navigate('/campaigns')}>Back to campaigns</Button>
+          <Button onClick={() => navigate(appPath('/campaigns'))}>Back to campaigns</Button>
         </div>
       </div>
     );
@@ -113,7 +114,7 @@ export default function CampaignDetail() {
 
   const handleDuplicate = async () => {
     const created = await commands.duplicateCampaign(campaign.id);
-    navigate(`/campaigns/${created.id}?edit=1`);
+    navigate(appPath(`/campaigns/${created.id}?edit=1`));
   };
 
   const adCount = campaign.adIds.length;
@@ -205,7 +206,7 @@ export default function CampaignDetail() {
         onConfirm={() => {
           void commands.deleteCampaign(campaign.id);
           setConfirmCampaignDelete(false);
-          navigate('/campaigns');
+          navigate(appPath('/campaigns'));
         }}
       />
 

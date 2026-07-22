@@ -32,6 +32,7 @@ import type {
   DuplicateCampaignResponse,
   RegisterRequest,
   RegisterResponse,
+  RestaurantInsightsResponse,
   RestaurantPatch,
   RestaurantProfile,
   SetStatusRequest,
@@ -94,5 +95,7 @@ export interface ApiClient {
     series(query: AnalyticsSeriesQuery): Promise<AnalyticsSeriesResponse>;
     audienceInsights(): Promise<AudienceInsightsResponse>;
     clickSignals(adId: string): Promise<ClickSignalsResponse>;
+    /** Organic (non-ad) restaurant performance: discovery, menu engagement, conversion, ratings. */
+    restaurantInsights(): Promise<RestaurantInsightsResponse>;
   };
 }

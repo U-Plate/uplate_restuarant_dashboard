@@ -12,7 +12,7 @@ import type {
 } from '../types';
 import { DEMO_SCHOOL_ID } from './constants';
 
-function seeded(seed: number) {
+export function seeded(seed: number) {
   let s = seed % 2147483647;
   if (s <= 0) s += 2147483646;
   return () => {
@@ -21,7 +21,7 @@ function seeded(seed: number) {
   };
 }
 
-function daysAgo(n: number): string {
+export function daysAgo(n: number): string {
   const d = new Date();
   d.setDate(d.getDate() - n);
   d.setHours(0, 0, 0, 0);
