@@ -3,13 +3,12 @@
 // feature (ads/campaigns/targeting) references them. Mirrors how
 // `data/constants.ts` holds AUDIENCE_LABEL / DIETARY_LABEL for the ads side.
 
-export type HealthGoal = 'cut' | 'bulk' | 'maintain' | 'performance';
+export type HealthGoal = 'cut' | 'bulk' | 'maintain';
 
 export const HEALTH_GOAL_LABEL: Record<HealthGoal, string> = {
   cut: 'Cutting',
   bulk: 'Bulking',
   maintain: 'Maintaining',
-  performance: 'Performance',
 };
 
 export type AgeBucket = '18–19' | '20–21' | '22–23' | '24+';

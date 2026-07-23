@@ -1,84 +1,52 @@
-import { useState } from 'react';
-import { ChevronDown } from 'lucide-react';
 import type { InsightComposition } from '../../api';
 import { formatPercent } from '../../lib/format';
 import { RankedRows } from './RankedRows';
 import { EmptyNote } from './EmptyNote';
 
-type Category = 'age' | 'dietary' | 'healthGoal' | 'cuisine';
-
-const CATEGORY_LABEL: Record<Category, string> = {
-  age: 'Age',
-  dietary: 'Dietary',
-  healthGoal: 'Health goal',
-  cuisine: 'Favorite cuisines',
-};
-
 interface CompositionPanelProps {
   composition: InsightComposition;
 }
 
+// Health-goal and dietary mix used to live here too, but owners care about
+// those tied to a specific item ("who's ordering what"), not the restaurant
+// overall — that view moved into the Menu performance section. Age and
+// cuisine affinity aren't item-specific in the same way, so they stay here
+// as general audience context.
 export function CompositionPanel({ composition }: CompositionPanelProps) {
-  const [category, setCategory] = useState<Category>('age');
-  const rows = composition[
-    category === 'age' ? 'ageBuckets' : category
-  ].filter((r) => r.pct > 0);
+  if (composition.visitorCount === 0) {
+    return <EmptyNote>Who's viewing you shows up once you have visitors to describe.</EmptyNote>;
+  }
+
+  const age = composition.ageBuckets.filter((r) => r.pct > 0);
+  const cuisine = composition.cuisine.filter((r) => r.pct > 0);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s-4)' }}>
-      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-        <CategorySelect value={category} onChange={setCategory} />
-      </div>
-      {composition.visitorCount === 0 ? (
-        <EmptyNote>Who's viewing you shows up once you have visitors to describe.</EmptyNote>
-      ) : rows.length === 0 ? (
-        <EmptyNote>No {CATEGORY_LABEL[category].toLowerCase()} data among your viewers yet.</EmptyNote>
-      ) : (
-        <RankedRows
-          ariaLabel={CATEGORY_LABEL[category]}
-          rows={rows.map((r) => ({ key: r.key, label: r.label, value: formatPercent(r.pct, 0) }))}
-        />
-      )}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s-5)' }}>
+      <CompositionGroup title="Age" rows={age} emptyLabel="age" />
+      <CompositionGroup title="Favorite cuisines" rows={cuisine} emptyLabel="favorite cuisine" />
     </div>
   );
 }
 
-function CategorySelect({ value, onChange }: { value: Category; onChange: (next: Category) => void }) {
+function CompositionGroup({
+  title,
+  rows,
+  emptyLabel,
+}: {
+  title: string;
+  rows: InsightComposition['ageBuckets'];
+  emptyLabel: string;
+}) {
   return (
-    <label
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 6,
-        background: 'var(--surface-sunken)',
-        border: '1px solid var(--hairline)',
-        borderRadius: 'var(--r-md)',
-        padding: '0 10px',
-        height: 32,
-      }}
-    >
-      <span style={{ fontSize: 'var(--type-meta)', color: 'var(--ink-3)' }}>Show</span>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value as Category)}
-        style={{
-          border: 'none',
-          background: 'transparent',
-          color: 'var(--ink)',
-          fontFamily: 'var(--font-ui)',
-          fontSize: 'var(--type-meta)',
-          fontWeight: 600,
-          appearance: 'none',
-          paddingRight: 16,
-        }}
-      >
-        {(Object.keys(CATEGORY_LABEL) as Category[]).map((k) => (
-          <option key={k} value={k}>
-            {CATEGORY_LABEL[k]}
-          </option>
-        ))}
-      </select>
-      <ChevronDown size={12} strokeWidth={2} color="var(--ink-3)" style={{ marginLeft: -14, pointerEvents: 'none' }} />
-    </label>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--s-3)' }}>
+      <span style={{ fontSize: 'var(--type-eyebrow)', color: 'var(--ink-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+        {title}
+      </span>
+      {rows.length === 0 ? (
+        <EmptyNote>No {emptyLabel} data among your viewers yet.</EmptyNote>
+      ) : (
+        <RankedRows ariaLabel={title} rows={rows.map((r) => ({ key: r.key, label: r.label, value: formatPercent(r.pct, 0) }))} />
+      )}
+    </div>
   );
 }

@@ -100,6 +100,43 @@ const MENU_ITEM_TUNING: MenuItemTuning[] = [
 
 const RESTAURANT_CUISINES = ['Mediterranean', 'American', 'Japanese', 'Thai', 'Middle Eastern', 'Greek', 'French'];
 
+// Which visitor segments gravitate toward which item — drives the "who's
+// ordering what" audience breakdown on the insights tab. Without this, item
+// choice would be pure popularity, uncorrelated with diner profile, and the
+// per-item audience mix would just mirror the restaurant-wide baseline with
+// no signal for an owner to act on.
+const ITEM_DIETARY_AFFINITY: Partial<Record<string, Partial<Record<DietaryPreference, number>>>> = {
+  mi1: { halal: 1.6 }, // Chicken Quinoa Power Bowl
+  mi2: { pescatarian: 2.8, kosher: 2.8 }, // Salmon Macro Plate
+  mi3: { vegetarian: 1.6, kosher: 1.4 }, // Greek Yogurt Recovery Cup
+  mi4: { vegan: 2.6, vegetarian: 1.8 }, // Smoky Tofu Buddha Bowl
+  mi5: { vegan: 2.0, vegetarian: 1.6, halal: 2.6 }, // Falafel Power Wrap
+  mi7: { vegetarian: 1.5 }, // Iced Matcha + Croissant
+  mi8: { vegan: 1.6, kosher: 1.3 }, // Steel-Cut Oat Builder
+  mi9: { vegetarian: 1.7 }, // Avocado Toast + Egg
+};
+
+const ITEM_HEALTHGOAL_AFFINITY: Partial<Record<string, Partial<Record<HealthGoal, number>>>> = {
+  mi1: { bulk: 1.6, maintain: 1.4 }, // Chicken Quinoa Power Bowl
+  mi2: { bulk: 1.5, maintain: 1.3 }, // Salmon Macro Plate
+  mi3: { cut: 1.8 }, // Greek Yogurt Recovery Cup
+  mi4: { cut: 1.3, maintain: 1.2 }, // Smoky Tofu Buddha Bowl
+  mi5: { maintain: 1.2 }, // Falafel Power Wrap
+  mi6: { bulk: 1.6 }, // Midnight Ramen Bowl
+  mi7: { maintain: 1.3 }, // Iced Matcha + Croissant
+  mi8: { bulk: 1.5, cut: 1.2 }, // Steel-Cut Oat Builder
+  mi9: { cut: 1.4, maintain: 1.2 }, // Avocado Toast + Egg
+};
+
+function itemWeightsForVisitor(profile: VisitorProfile): number[] {
+  return MENU_ITEM_TUNING.map((m) => {
+    let w = m.popularity;
+    if (profile.dietary) w *= ITEM_DIETARY_AFFINITY[m.id]?.[profile.dietary] ?? 1;
+    w *= ITEM_HEALTHGOAL_AFFINITY[m.id]?.[profile.healthGoal] ?? 1;
+    return w;
+  });
+}
+
 function pickIndexWeighted(weights: number[], rand: () => number): number {
   const total = weights.reduce((a, b) => a + b, 0);
   let target = rand() * total;
@@ -131,20 +168,19 @@ function later(base: Date, minMinutes: number, maxMinutes: number, rand: () => n
 
 function pickDietary(rand: () => number): DietaryPreference | null {
   const r = rand();
-  if (r < 0.12) return 'vegan';
-  if (r < 0.32) return 'vegetarian';
-  if (r < 0.4) return 'pescatarian';
-  if (r < 0.45) return 'halal';
-  if (r < 0.48) return 'kosher';
+  if (r < 0.14) return 'vegan';
+  if (r < 0.34) return 'vegetarian';
+  if (r < 0.44) return 'pescatarian';
+  if (r < 0.52) return 'halal';
+  if (r < 0.63) return 'kosher';
   return null;
 }
 
 function pickHealthGoal(rand: () => number): HealthGoal {
   const r = rand();
-  if (r < 0.3) return 'cut';
-  if (r < 0.55) return 'bulk';
-  if (r < 0.85) return 'maintain';
-  return 'performance';
+  if (r < 0.35) return 'cut';
+  if (r < 0.65) return 'bulk';
+  return 'maintain';
 }
 
 function pickCuisines(rand: () => number): string[] {
@@ -165,7 +201,6 @@ function clampRating(value: number): number {
 export function buildRestaurantInsightSeed(): RestaurantInsightSeed {
   const rand = seeded(90210);
   const menuItems = MENU_ITEM_TUNING.map(({ id, name }) => ({ id, name }));
-  const popularityWeights = MENU_ITEM_TUNING.map((m) => m.popularity);
 
   const visitors = new Map<string, VisitorProfile>();
   const views: RestaurantViewEvent[] = [];
@@ -177,7 +212,7 @@ export function buildRestaurantInsightSeed(): RestaurantInsightSeed {
   let eventSeq = 0;
   const nextId = (prefix: string) => `${prefix}${++eventSeq}`;
 
-  const VISITOR_POOL = 220;
+  const VISITOR_POOL = 820;
   for (let v = 0; v < VISITOR_POOL; v++) {
     if (rand() >= 0.62) continue; // this potential visitor never found the restaurant
 
@@ -191,6 +226,7 @@ export function buildRestaurantInsightSeed(): RestaurantInsightSeed {
       cuisines: pickCuisines(rand),
     };
     visitors.set(userId, profile);
+    const itemWeights = itemWeightsForVisitor(profile);
 
     const numViews = 1 + Math.floor(Math.pow(rand(), 1.6) * 4);
     for (let i = 0; i < numViews; i++) {
@@ -206,7 +242,7 @@ export function buildRestaurantInsightSeed(): RestaurantInsightSeed {
       if (rand() >= 0.52) continue;
       const numItems = rand() < 0.7 ? 1 : 2;
       for (let k = 0; k < numItems; k++) {
-        const itemIdx = pickIndexWeighted(popularityWeights, rand);
+        const itemIdx = pickIndexWeighted(itemWeights, rand);
         const item = MENU_ITEM_TUNING[itemIdx];
         const itemViewedAt = later(menuViewedAt, 0.2, 3, rand);
         itemViews.push({
@@ -216,7 +252,7 @@ export function buildRestaurantInsightSeed(): RestaurantInsightSeed {
           occurredAt: itemViewedAt.toISOString(),
         });
 
-        const logProb = Math.min(0.92, 0.34 * item.commitBias);
+        const logProb = Math.min(0.92, 0.46 * item.commitBias);
         if (rand() >= logProb) continue;
         const loggedAt = later(itemViewedAt, 20, 8 * 60, rand);
         mealLogs.push({

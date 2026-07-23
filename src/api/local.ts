@@ -33,7 +33,6 @@ import type {
   DuplicateAdResponse,
   DuplicateCampaignRequest,
   DuplicateCampaignResponse,
-  InsightMenuItemRow,
   RegisterRequest,
   RegisterResponse,
 
@@ -53,6 +52,8 @@ import { buildRestaurantInsightSeed } from '../data/restaurantInsightsMockData';
 import { cloneAd, cloneCampaign, emptyTargeting, newAdSkeleton, newCampaignSkeleton } from '../lib/clone';
 import { AUDIENCE_LABEL, DIETARY_LABEL, DEMO_SCHOOL_ID } from '../data/constants';
 import { HEALTH_GOAL_LABEL, ageBucket, titleCase as titleCaseWords } from '../lib/insights';
+import type { HealthGoal } from '../lib/insights';
+import type { DietaryPreference } from '../types';
 
 // Generated once per session (module scope), then aggregated fresh on every
 // `restaurantInsights()` call — same "real math over seeded events" posture
@@ -315,7 +316,6 @@ function computeRestaurantInsights(): RestaurantInsightsResponse {
     return d >= minDays && d < maxDays;
   };
   const dateOf = (iso: string) => iso.slice(0, 10);
-  const monIndexedDow = (iso: string) => (new Date(iso).getDay() + 6) % 7;
 
   // ---- visitor-level facts shared across sections ----
   const daysByVisitor = new Map<string, Set<string>>();
@@ -338,12 +338,25 @@ function computeRestaurantInsights(): RestaurantInsightsResponse {
   const prior7Views = seed.views.filter((v) => inWindow(v.occurredAt, 7, 14)).length;
   const viewsDelta = prior7Views === 0 ? null : (last7Views - prior7Views) / prior7Views;
 
+  const ratingByDate = new Map<string, { sum: number; count: number }>();
+  for (const r of seed.ratings) {
+    const date = dateOf(r.occurredAt);
+    const cur = ratingByDate.get(date) ?? { sum: 0, count: 0 };
+    cur.sum += r.rating;
+    cur.count += 1;
+    ratingByDate.set(date, cur);
+  }
+  const ratingTrend = [...ratingByDate.entries()]
+    .map(([date, { sum, count }]) => ({ date, average: sum / count }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+
   const hero: RestaurantInsightsResponse['hero'] = {
     views: totalViews,
     viewsDelta,
     loggedMeals: totalLogged,
     avgRating,
     ratingCount,
+    ratingTrend,
     repeatVisitorPct,
     visitorCount,
   };
@@ -354,12 +367,9 @@ function computeRestaurantInsights(): RestaurantInsightsResponse {
   // report a discovery source mix (search/retail/ad); that framing implied a
   // "how are we winning customers" story this data can't support yet.
   const seriesByDate = new Map<string, number>();
-  const heatmapCells = Array.from({ length: 7 * 24 }, () => 0);
   for (const v of seed.views) {
     const date = dateOf(v.occurredAt);
     seriesByDate.set(date, (seriesByDate.get(date) ?? 0) + 1);
-    const hour = new Date(v.occurredAt).getHours();
-    heatmapCells[monIndexedDow(v.occurredAt) * 24 + hour] += 1;
   }
   const series = [...seriesByDate.entries()]
     .map(([date, views]) => ({ date, views }))
@@ -367,7 +377,6 @@ function computeRestaurantInsights(): RestaurantInsightsResponse {
 
   const traffic: RestaurantInsightsResponse['traffic'] = {
     series,
-    heatmap: { cells: heatmapCells, max: Math.max(1, ...heatmapCells) },
     newVisitorPct,
     repeatVisitorPct,
   };
@@ -417,28 +426,6 @@ function computeRestaurantInsights(): RestaurantInsightsResponse {
     };
   });
 
-  const toRow = (r: (typeof menuItemRows)[number]): InsightMenuItemRow => ({
-    menuItemId: r.menuItemId,
-    name: r.name,
-    views: r.views,
-    logs: r.logs,
-    avgRating: r.avgRating,
-    ratingCount: r.ratingCount,
-  });
-
-  const topItems = [...menuItemRows]
-    .filter((r) => r.views > 0)
-    .sort((a, b) => b.views - a.views)
-    .slice(0, 6)
-    .map(toRow);
-
-  const underperformingItems = [...menuItemRows]
-    .filter((r) => r.views >= 5)
-    .map((r) => ({ ...r, logRate: r.logs / r.views }))
-    .sort((a, b) => a.logRate - b.logRate)
-    .slice(0, 3)
-    .map(toRow);
-
   const trending = menuItemRows
     .filter((r) => r.viewsPrior7 > 0)
     .map((r) => ({
@@ -453,45 +440,152 @@ function computeRestaurantInsights(): RestaurantInsightsResponse {
   const menu: RestaurantInsightsResponse['menu'] = {
     menuViews: menuViewsCount,
     menuViewRate: totalViews === 0 ? 0 : menuViewsCount / totalViews,
-    topItems,
-    underperformingItems,
     trending,
   };
 
-  // ---- ratings ----
-  const ratingByDate = new Map<string, { sum: number; count: number }>();
-  for (const r of seed.ratings) {
-    const date = dateOf(r.occurredAt);
-    const cur = ratingByDate.get(date) ?? { sum: 0, count: 0 };
-    cur.sum += r.rating;
-    cur.count += 1;
-    ratingByDate.set(date, cur);
+  // ---- audience by item (who's ordering what) ----
+  // Health goal and dietary mix used to live in the composition panel below,
+  // restaurant-wide only. Owners actually want it tied to *which item* —
+  // "restaurants want to know what types of people are ordering which menu
+  // items" — so it's computed per item here, with the restaurant-wide mix
+  // kept only as the baseline `standout` compares each item against.
+  const MIN_LOGS_FOR_BREAKDOWN = 5;
+  const STANDOUT_DELTA = 0.15; // an item needs to beat its own restaurant's baseline by 15pts to get called out
+  const MIN_LEADER_COUNT = 3; // a segment's "#1 item" needs at least this many logs from that segment before it's shown
+  // Every health goal and every dietary preference gets its own named slice —
+  // there's no leftover "Other" group on either axis.
+  const NAMED_HEALTH_GOALS: HealthGoal[] = ['bulk', 'cut', 'maintain'];
+  const NAMED_DIETARY: DietaryPreference[] = ['vegan', 'vegetarian', 'pescatarian', 'halal', 'kosher'];
+
+  interface ItemDemo {
+    healthGoal: Record<HealthGoal, number>;
+    dietary: Partial<Record<DietaryPreference, number>>;
+    dietaryLogged: number;
   }
-  const ratingTrend = [...ratingByDate.entries()]
-    .map(([date, { sum, count }]) => ({ date, average: sum / count }))
-    .sort((a, b) => a.date.localeCompare(b.date));
-  const lowestRated = [...menuItemRows]
-    .filter((r) => r.ratingCount >= 3)
-    .sort((a, b) => a.avgRating - b.avgRating)
-    .slice(0, 3)
-    .map(toRow);
-  const ratings: RestaurantInsightsResponse['ratings'] = {
-    average: avgRating,
-    count: ratingCount,
-    trend: ratingTrend,
-    lowestRated,
+  const emptyHealthGoalCounts = (): Record<HealthGoal, number> => ({ cut: 0, bulk: 0, maintain: 0 });
+  const demoByItem = new Map<string, ItemDemo>();
+  const baselineHealthGoal = emptyHealthGoalCounts();
+  const baselineDietary: Partial<Record<DietaryPreference, number>> = {};
+  let baselineLogged = 0;
+  let baselineDietaryLogged = 0;
+
+  // Segment -> item -> raw log count, the inverse of demoByItem — powers the
+  // "#1 item for this segment" leaderboard below.
+  const itemCountsBySegment = new Map<string, Map<string, number>>();
+  const bumpSegmentItemCount = (segmentKey: string, menuItemId: string) => {
+    const byItem = itemCountsBySegment.get(segmentKey) ?? new Map<string, number>();
+    byItem.set(menuItemId, (byItem.get(menuItemId) ?? 0) + 1);
+    itemCountsBySegment.set(segmentKey, byItem);
   };
 
-  // ---- customer composition (profile mix among actual viewers) ----
+  for (const log of seed.mealLogs) {
+    const visitor = seed.visitors.get(log.userId);
+    if (!visitor) continue;
+    const demo = demoByItem.get(log.menuItemId) ?? { healthGoal: emptyHealthGoalCounts(), dietary: {}, dietaryLogged: 0 };
+    demo.healthGoal[visitor.healthGoal] += 1;
+    baselineHealthGoal[visitor.healthGoal] += 1;
+    baselineLogged += 1;
+    bumpSegmentItemCount(`healthGoal:${visitor.healthGoal}`, log.menuItemId);
+    if (visitor.dietary) {
+      demo.dietary[visitor.dietary] = (demo.dietary[visitor.dietary] ?? 0) + 1;
+      demo.dietaryLogged += 1;
+      baselineDietary[visitor.dietary] = (baselineDietary[visitor.dietary] ?? 0) + 1;
+      baselineDietaryLogged += 1;
+      bumpSegmentItemCount(`dietary:${visitor.dietary}`, log.menuItemId);
+    }
+    demoByItem.set(log.menuItemId, demo);
+  }
+
+  const healthGoalSlices = (counts: Record<HealthGoal, number>, total: number) => {
+    if (total === 0) return [] as { key: string; label: string; pct: number }[];
+    return NAMED_HEALTH_GOALS.map((k) => ({ key: k, label: HEALTH_GOAL_LABEL[k], pct: counts[k] / total }))
+      .filter((s) => s.pct > 0)
+      .sort((a, b) => b.pct - a.pct);
+  };
+  const dietarySlices = (counts: Partial<Record<DietaryPreference, number>>, loggedTotal: number) => {
+    if (loggedTotal === 0) return [] as { key: string; label: string; pct: number }[];
+    return NAMED_DIETARY.map((k) => ({ key: k, label: DIETARY_LABEL[k], pct: (counts[k] ?? 0) / loggedTotal }))
+      .filter((s) => s.pct > 0)
+      .sort((a, b) => b.pct - a.pct);
+  };
+
+  const baselineHealthGoalSlices = healthGoalSlices(baselineHealthGoal, baselineLogged);
+  const baselineDietarySlices = dietarySlices(baselineDietary, baselineDietaryLogged);
+  const baselinePctByKey = new Map<string, number>();
+  for (const s of baselineHealthGoalSlices) baselinePctByKey.set(`healthGoal:${s.key}`, s.pct);
+  for (const s of baselineDietarySlices) baselinePctByKey.set(`dietary:${s.key}`, s.pct);
+
+  const findStandout = (
+    healthGoal: { key: string; label: string; pct: number }[],
+    dietary: { key: string; label: string; pct: number }[],
+  ): RestaurantInsightsResponse['audienceByItem']['items'][number]['standout'] => {
+    let best: RestaurantInsightsResponse['audienceByItem']['items'][number]['standout'] = null;
+    for (const [axis, slices] of [
+      ['healthGoal', healthGoal],
+      ['dietary', dietary],
+    ] as const) {
+      for (const s of slices) {
+        if (s.key === 'other') continue;
+        const delta = s.pct - (baselinePctByKey.get(`${axis}:${s.key}`) ?? 0);
+        if (delta >= STANDOUT_DELTA && (!best || delta > best.deltaPct)) {
+          best = { axis, label: s.label, deltaPct: delta };
+        }
+      }
+    }
+    return best;
+  };
+
+  const audienceItems: RestaurantInsightsResponse['audienceByItem']['items'] = [...menuItemRows]
+    .filter((r) => r.logs > 0)
+    .sort((a, b) => b.logs - a.logs)
+    .map((r) => {
+      const demo = demoByItem.get(r.menuItemId);
+      const belowThreshold = r.logs < MIN_LOGS_FOR_BREAKDOWN;
+      const healthGoal = !belowThreshold && demo ? healthGoalSlices(demo.healthGoal, r.logs) : [];
+      const dietary = !belowThreshold && demo ? dietarySlices(demo.dietary, demo.dietaryLogged) : [];
+      return {
+        menuItemId: r.menuItemId,
+        name: r.name,
+        logs: r.logs,
+        avgRating: r.avgRating,
+        ratingCount: r.ratingCount,
+        trendPct: r.viewsPrior7 === 0 ? null : (r.views7 - r.viewsPrior7) / r.viewsPrior7,
+        belowThreshold,
+        healthGoal,
+        dietary,
+        standout: belowThreshold ? null : findStandout(healthGoal, dietary),
+      };
+    });
+
+  const nameById = new Map(menuItemRows.map((r) => [r.menuItemId, r.name]));
+  const segmentLeader = (segmentKey: string, key: string, label: string): RestaurantInsightsResponse['audienceByItem']['leaders'][number] | null => {
+    const byItem = itemCountsBySegment.get(segmentKey);
+    if (!byItem) return null;
+    let best: [string, number] | null = null;
+    for (const entry of byItem) {
+      if (!best || entry[1] > best[1]) best = entry;
+    }
+    if (!best || best[1] < MIN_LEADER_COUNT) return null;
+    return { key, label, menuItemId: best[0], name: nameById.get(best[0]) ?? '', count: best[1] };
+  };
+  const leaders = [
+    ...NAMED_HEALTH_GOALS.map((k) => segmentLeader(`healthGoal:${k}`, k, HEALTH_GOAL_LABEL[k])),
+    ...NAMED_DIETARY.map((k) => segmentLeader(`dietary:${k}`, k, DIETARY_LABEL[k])),
+  ].filter((l): l is RestaurantInsightsResponse['audienceByItem']['leaders'][number] => l !== null);
+
+  const audienceByItem: RestaurantInsightsResponse['audienceByItem'] = {
+    minLogsThreshold: MIN_LOGS_FOR_BREAKDOWN,
+    baseline: { healthGoal: baselineHealthGoalSlices, dietary: baselineDietarySlices },
+    leaders,
+    items: audienceItems,
+  };
+
+  // ---- customer composition (age & cuisine mix among actual viewers) ----
   const ageBucketCounts = new Map<string, number>();
-  const dietaryCounts = new Map<string, number>();
-  const healthGoalCounts = new Map<string, number>();
   const cuisineCounts = new Map<string, number>();
   for (const visitor of seed.visitors.values()) {
     const bucket = ageBucket(visitor.age);
     ageBucketCounts.set(bucket, (ageBucketCounts.get(bucket) ?? 0) + 1);
-    if (visitor.dietary) dietaryCounts.set(visitor.dietary, (dietaryCounts.get(visitor.dietary) ?? 0) + 1);
-    healthGoalCounts.set(visitor.healthGoal, (healthGoalCounts.get(visitor.healthGoal) ?? 0) + 1);
     for (const cuisine of visitor.cuisines) {
       const key = cuisine.toLowerCase();
       cuisineCounts.set(key, (cuisineCounts.get(key) ?? 0) + 1);
@@ -505,27 +599,13 @@ function computeRestaurantInsights(): RestaurantInsightsResponse {
       label: bucket,
       pct: pctOfVisitors(ageBucketCounts.get(bucket) ?? 0),
     })),
-    dietary: [...dietaryCounts.entries()]
-      .map(([key, count]) => ({
-        key,
-        label: DIETARY_LABEL[key as keyof typeof DIETARY_LABEL] ?? key,
-        pct: pctOfVisitors(count),
-      }))
-      .sort((a, b) => b.pct - a.pct),
-    healthGoal: [...healthGoalCounts.entries()]
-      .map(([key, count]) => ({
-        key,
-        label: HEALTH_GOAL_LABEL[key as keyof typeof HEALTH_GOAL_LABEL] ?? key,
-        pct: pctOfVisitors(count),
-      }))
-      .sort((a, b) => b.pct - a.pct),
     cuisine: [...cuisineCounts.entries()]
       .map(([key, count]) => ({ key, label: titleCaseWords(key), pct: pctOfVisitors(count) }))
       .sort((a, b) => b.pct - a.pct)
       .slice(0, 6),
   };
 
-  return { hero, traffic, menu, ratings, composition };
+  return { hero, traffic, menu, audienceByItem, composition };
 }
 
 function toRestaurantProfile(state: AppState): RestaurantProfile {

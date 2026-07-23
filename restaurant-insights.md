@@ -118,7 +118,7 @@ rule — it should anchor the top of the page.
 ### D. Ratings & Quality
 - **Average Rating** — overall and per item (`Rating`)
 - **Rating Trend** *(new)* — rolling average over time, so a menu change's effect is visible
-- **Lowest-Rated Items** *(new)* — surfaces exactly what needs attention, mirrors the existing ads "worst 3 by CTR" pattern (`backend.md` §10.4 `CampaignDetailResponse.worst`)
+- **All Rated Items** *(new)* — every menu item with at least one rating, ranked highest to lowest, so an owner sees the full quality picture rather than just the worst performers
 
 ### E. Search & Demand Signals
 - **Top Searches** — queries where this restaurant appeared in `resultRestaurantIds`, ranked by frequency (see §4 for the scoping design)

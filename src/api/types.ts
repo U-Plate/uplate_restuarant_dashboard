@@ -389,24 +389,16 @@ export interface InsightHeroStats {
   loggedMeals: number;
   avgRating: number;
   ratingCount: number;
+  /** Rolling daily average rating, most recent last — powers the sparkline on the Average rating tile. */
+  ratingTrend: Array<{ date: string; average: number }>;
   repeatVisitorPct: number;
   visitorCount: number;
 }
 
 export interface InsightTraffic {
   series: InsightPoint[];
-  heatmap: { cells: number[]; max: number };
   newVisitorPct: number;
   repeatVisitorPct: number;
-}
-
-export interface InsightMenuItemRow {
-  menuItemId: string;
-  name: string;
-  views: number;
-  logs: number;
-  avgRating: number;
-  ratingCount: number;
 }
 
 export interface InsightTrendingItem {
@@ -418,16 +410,8 @@ export interface InsightTrendingItem {
 export interface InsightMenuPerformance {
   menuViews: number;
   menuViewRate: number;
-  topItems: InsightMenuItemRow[];
-  underperformingItems: InsightMenuItemRow[];
+  /** Items with a positive week-over-week view change — surfaced as a star next to the item name, not a standalone list. */
   trending: InsightTrendingItem[];
-}
-
-export interface InsightRatings {
-  average: number;
-  count: number;
-  trend: Array<{ date: string; average: number }>;
-  lowestRated: InsightMenuItemRow[];
 }
 
 export interface InsightCompositionRow {
@@ -439,16 +423,58 @@ export interface InsightCompositionRow {
 export interface InsightComposition {
   visitorCount: number;
   ageBuckets: InsightCompositionRow[];
-  dietary: InsightCompositionRow[];
-  healthGoal: InsightCompositionRow[];
   cuisine: InsightCompositionRow[];
+}
+
+/** A single named segment's share of an item's (or the restaurant's) logs, e.g. `{ key: 'vegan', label: 'Vegan', pct: 0.31 }`. */
+export type InsightAudienceSlice = InsightCompositionRow;
+
+export interface InsightItemAudience {
+  menuItemId: string;
+  name: string;
+  logs: number;
+  avgRating: number;
+  ratingCount: number;
+  /** Week-over-week change in item views, `(views7 - viewsPrior7) / viewsPrior7`. `null` when the item had no views the prior week (no baseline to trend against). Drives the "Trending" sort. */
+  trendPct: number | null;
+  /** True when `logs` is below `InsightAudienceByItem.minLogsThreshold` — too few logs to break down without risking exposing an individual diner. `healthGoal`/`dietary` are empty in this case. */
+  belowThreshold: boolean;
+  /** Bulk / Cut / Maintain, highest share first — every health goal is named, no "Other" slice. */
+  healthGoal: InsightAudienceSlice[];
+  /** Every dietary preference (Vegan / Vegetarian / Pescatarian / Halal / Kosher), highest share first — no "Other" slice. Denominator is logs by diners who set a preference, not all logs. */
+  dietary: InsightAudienceSlice[];
+  /** The single segment (if any) that over-indexes vs. the restaurant-wide baseline by at least the standout threshold. */
+  standout: { axis: 'healthGoal' | 'dietary'; label: string; deltaPct: number } | null;
+}
+
+/** The item a segment logs most often, by raw count — e.g. "#1 Bulk: Chicken Quinoa Power Bowl". */
+export interface InsightSegmentLeader {
+  key: string;
+  label: string;
+  menuItemId: string;
+  name: string;
+  count: number;
+}
+
+export interface InsightAudienceByItem {
+  /** Minimum logged meals an item needs before its breakdown is shown. */
+  minLogsThreshold: number;
+  /** Restaurant-wide health-goal/dietary mix, computed the same way as each item's — the baseline `standout` compares against. */
+  baseline: {
+    healthGoal: InsightAudienceSlice[];
+    dietary: InsightAudienceSlice[];
+  };
+  /** Top item per named segment (health goal + dietary), by raw log count. Omitted when the segment's top item has fewer than a minimum number of logs. */
+  leaders: InsightSegmentLeader[];
+  /** Every item with at least one log, ranked by logs descending. */
+  items: InsightItemAudience[];
 }
 
 export interface RestaurantInsightsResponse {
   hero: InsightHeroStats;
   traffic: InsightTraffic;
   menu: InsightMenuPerformance;
-  ratings: InsightRatings;
+  audienceByItem: InsightAudienceByItem;
   composition: InsightComposition;
 }
 

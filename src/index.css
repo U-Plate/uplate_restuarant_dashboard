@@ -1831,3 +1831,16 @@ html[data-auth='true'] body {
   color: var(--ink-2);
   font-variation-settings: 'opsz' 36;
 }
+
+/* Insights: expandable per-item audience rows (who's ordering what) */
+.uplate-audience-row > summary {
+  cursor: pointer;
+  list-style: none;
+}
+.uplate-audience-row > summary::-webkit-details-marker { display: none; }
+.uplate-audience-row > summary::marker { display: none; }
+.uplate-audience-row > summary:hover { background: var(--surface-sunken); }
+.uplate-audience-row[open] > summary .uplate-audience-chevron { transform: rotate(180deg); }
+
+.uplate-audience-toggle { cursor: pointer; }
+.uplate-audience-toggle:hover { background: var(--surface-sunken); }
